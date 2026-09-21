@@ -1,13 +1,14 @@
 package com.netty.echo.transport.netty;
 
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 import java.util.concurrent.TimeUnit;
 
+import com.google.protobuf.ByteString;
 import com.netty.echo.net.Address;
+import com.netty.echo.protocol.WireProtocol;
 import com.netty.echo.transport.Transport;
 
 import io.netty.bootstrap.Bootstrap;
@@ -19,8 +20,6 @@ import io.netty.channel.ChannelFutureListener;
  * NettyTransport
  */
 public class NettyTransport implements Transport {
-
-    static final String MESSAGE_ID_SEPARATOR = " ";
 
     private final Bootstrap bootstrap;
     private final ServerBootstrap serverBootstrap;
@@ -34,17 +33,13 @@ public class NettyTransport implements Transport {
     }
 
     public void send(Address address, byte[] payload) {
-        send(address, new String(payload, StandardCharsets.UTF_8));
+        send(address, WireProtocol.Envelope.newBuilder()
+            .setKind(WireProtocol.Envelope.Kind.APPLICATION)
+            .setPayload(ByteString.copyFrom(payload))
+            .build());
     }
 
-    /**
-     * Send a message to a specific address.
-     * @param address
-     * @param message
-     */
-    private void send(Address address, String message) {
-        final String framed = message.endsWith("\n") ? message : message + "\r\n";
-
+    private void send(Address address, WireProtocol.Envelope envelope) {
         var channel = connections.get(address);
         if(channel == null) {
             bootstrap.connect(address.host(), address.port()).addListener((ChannelFutureListener) future -> {
@@ -60,11 +55,11 @@ public class NettyTransport implements Transport {
                 });
                 connections.putIfAbsent(address, connectedChannel);
 
-                connectedChannel.writeAndFlush(framed);
+                connectedChannel.writeAndFlush(envelope);
             });
 
         } else {
-            channel.writeAndFlush(framed);
+            channel.writeAndFlush(envelope);
         }
     }
 
@@ -74,8 +69,11 @@ public class NettyTransport implements Transport {
         var future = new CompletableFuture<byte[]>();
         futures.put(messageId, future);
 
-        var text = new String(payload, StandardCharsets.UTF_8);
-        send(address, messageId + MESSAGE_ID_SEPARATOR + text);
+        send(address, WireProtocol.Envelope.newBuilder()
+            .setMessageId(messageId.toString())
+            .setKind(WireProtocol.Envelope.Kind.APPLICATION)
+            .setPayload(ByteString.copyFrom(payload))
+            .build());
 
         try {
            return future.get(3, TimeUnit.SECONDS);

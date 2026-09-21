@@ -1,9 +1,11 @@
 package com.netty.echo.transport.netty;
 
-import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
+
+import com.netty.echo.protocol.ClusterProtocol;
+import com.netty.echo.protocol.WireProtocol;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -11,7 +13,7 @@ import io.netty.channel.SimpleChannelInboundHandler;
 /**
  * EchoClientHandler
  */
-public class EchoClientHandler extends SimpleChannelInboundHandler<String> {
+public class EchoClientHandler extends SimpleChannelInboundHandler<WireProtocol.Envelope> {
 
     private final ConcurrentMap<UUID, CompletableFuture<byte[]>> futures;
 
@@ -20,28 +22,31 @@ public class EchoClientHandler extends SimpleChannelInboundHandler<String> {
     }
 
     @Override
-    public void channelRead0(ChannelHandlerContext ctx, String text) throws Exception {
-        UUID messageId = parseMessageId(text);
+    public void channelRead0(ChannelHandlerContext ctx, WireProtocol.Envelope envelope) throws Exception {
+        UUID messageId = parseMessageId(envelope.getMessageId());
         CompletableFuture<byte[]> future = messageId == null ? null : futures.remove(messageId);
 
         if (future != null) {
-            int payloadStart = text.indexOf(NettyTransport.MESSAGE_ID_SEPARATOR) + NettyTransport.MESSAGE_ID_SEPARATOR.length();
-            future.complete(text.substring(payloadStart).getBytes(StandardCharsets.UTF_8));
+            future.complete(envelope.getPayload().toByteArray());
             return;
         }
 
-        System.out.println("[CLIENT] - Received: " + text);
+        if (envelope.getKind() == WireProtocol.Envelope.Kind.CLUSTER) {
+            var clusterMessage = ClusterProtocol.ClusterMessage.parseFrom(envelope.getPayload());
+            System.out.println("[CLIENT] - Cluster message: " + clusterMessage.getPayloadCase());
+            return;
+        }
+
+        System.out.println("[CLIENT] - Received: " + envelope.getPayload().toStringUtf8());
     }
 
-    private UUID parseMessageId(String text) {
-        int separatorIndex = text.indexOf(NettyTransport.MESSAGE_ID_SEPARATOR);
-
-        if (separatorIndex < 0) {
+    private UUID parseMessageId(String messageId) {
+        if (messageId.isEmpty()) {
             return null;
         }
 
         try {
-            return UUID.fromString(text.substring(0, separatorIndex));
+            return UUID.fromString(messageId);
         } catch (IllegalArgumentException ex) {
             return null;
         }

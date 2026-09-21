@@ -4,13 +4,15 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 
+import com.netty.echo.protocol.WireProtocol;
+
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
 import io.netty.channel.socket.SocketChannel;
-import io.netty.handler.codec.DelimiterBasedFrameDecoder;
-import io.netty.handler.codec.Delimiters;
-import io.netty.handler.codec.string.StringDecoder;
-import io.netty.handler.codec.string.StringEncoder;
+import io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import io.netty.handler.codec.LengthFieldPrepender;
+import io.netty.handler.codec.protobuf.ProtobufDecoder;
+import io.netty.handler.codec.protobuf.ProtobufEncoder;
 import io.netty.handler.logging.LogLevel;
 import io.netty.handler.logging.LoggingHandler;
 
@@ -18,6 +20,8 @@ import io.netty.handler.logging.LoggingHandler;
  * EchoClientInitializer
  */
 public class EchoClientInitializer extends ChannelInitializer<SocketChannel> {
+
+    static final int MAX_FRAME_LENGTH = 1024 * 1024;
 
     private final ConcurrentMap<UUID, CompletableFuture<byte[]>> futures;
 
@@ -29,9 +33,10 @@ public class EchoClientInitializer extends ChannelInitializer<SocketChannel> {
     protected void initChannel(SocketChannel ch) throws Exception {
         ChannelPipeline pipeline = ch.pipeline();
 
-        pipeline.addLast("framer", new DelimiterBasedFrameDecoder(8192, Delimiters.lineDelimiter()));
-        pipeline.addLast("decoder", new StringDecoder());
-        pipeline.addLast("encoder", new StringEncoder());
+        pipeline.addLast("frameDecoder", new LengthFieldBasedFrameDecoder(MAX_FRAME_LENGTH, 0, 4, 0, 4));
+        pipeline.addLast("frameEncoder", new LengthFieldPrepender(4));
+        pipeline.addLast("protobufDecoder", new ProtobufDecoder(WireProtocol.Envelope.getDefaultInstance()));
+        pipeline.addLast("protobufEncoder", new ProtobufEncoder());
 
         pipeline.addLast("logging", new LoggingHandler(LogLevel.DEBUG));
         pipeline.addLast("handler", new EchoClientHandler(futures));

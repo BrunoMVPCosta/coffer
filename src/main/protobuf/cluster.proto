@@ -1,0 +1,52 @@
+syntax = "proto3";
+
+package nettyecho.cluster;
+
+option java_package = "com.netty.echo.protocol";
+option java_outer_classname = "ClusterProtocol";
+
+message Node {
+  string id = 1;
+  string host = 2;
+  uint32 port = 3;
+}
+
+message Join {
+  string cluster_name = 1;
+  Node node = 2;
+}
+
+message Welcome {
+  string cluster_name = 1;
+  repeated Node members = 2;
+}
+
+message Ping {
+  Node sender = 1;
+}
+
+message Pong {
+  Node sender = 1;
+}
+
+message Members {
+  string cluster_name = 1;
+  repeated Node members = 2;
+}
+
+message Leave {
+  string node_id = 1;
+}
+
+message ClusterMessage {
+  uint32 protocol_version = 1;
+
+  oneof payload {
+    Join join = 2;
+    Welcome welcome = 3;
+    Ping ping = 4;
+    Pong pong = 5;
+    Members members = 6;
+    Leave leave = 7;
+  }
+}
