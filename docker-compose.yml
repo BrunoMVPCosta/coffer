@@ -1,0 +1,19 @@
+services:
+  node1:
+    image: netty-echo:latest
+    build: .
+    command: ["8080", "node2:8081", "node3:8082"]
+    ports:
+      - "8080:8080"
+
+  node2:
+    image: netty-echo:latest
+    command: ["8081", "node1:8080", "node3:8082"]
+    ports:
+      - "8081:8081"
+
+  node3:
+    image: netty-echo:latest
+    command: ["8082", "node1:8080", "node2:8081"]
+    ports:
+      - "8082:8082"

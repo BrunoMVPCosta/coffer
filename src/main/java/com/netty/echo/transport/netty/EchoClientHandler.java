@@ -1,5 +1,6 @@
 package com.netty.echo.transport.netty;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
@@ -20,21 +21,30 @@ public class EchoClientHandler extends SimpleChannelInboundHandler<String> {
 
     @Override
     public void channelRead0(ChannelHandlerContext ctx, String text) throws Exception {
-        System.out.println("[CLIENT] - Received: " + text);
+        UUID messageId = parseMessageId(text);
+        CompletableFuture<byte[]> future = messageId == null ? null : futures.remove(messageId);
 
-        try {
-            UUID messageId = UUID.fromString(text.replace("\n", ""));
-            CompletableFuture<byte[]> future = futures.get(messageId);
-            future.complete(text.getBytes());
-            futures.remove(messageId);
+        if (future != null) {
+            int payloadStart = text.indexOf(NettyTransport.MESSAGE_ID_SEPARATOR) + NettyTransport.MESSAGE_ID_SEPARATOR.length();
+            future.complete(text.substring(payloadStart).getBytes(StandardCharsets.UTF_8));
+            return;
         }
-        catch (Exception ex) {}
+
+        System.out.println("[CLIENT] - Received: " + text);
     }
 
-    @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        super.channelRead(ctx, msg);
-        System.out.println("[CLIENT] - Received: " + msg.toString());
+    private UUID parseMessageId(String text) {
+        int separatorIndex = text.indexOf(NettyTransport.MESSAGE_ID_SEPARATOR);
+
+        if (separatorIndex < 0) {
+            return null;
+        }
+
+        try {
+            return UUID.fromString(text.substring(0, separatorIndex));
+        } catch (IllegalArgumentException ex) {
+            return null;
+        }
     }
 
     @Override

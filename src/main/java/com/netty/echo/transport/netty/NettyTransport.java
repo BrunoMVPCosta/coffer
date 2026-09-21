@@ -24,6 +24,8 @@ import io.netty.channel.ChannelFutureListener;
  */
 public class NettyTransport implements Transport {
 
+    static final String MESSAGE_ID_SEPARATOR = " ";
+
     private final Bootstrap bootstrap;
     private final ServerBootstrap serverBootstrap;
     private final ConcurrentMap<Address, Channel> connections = new ConcurrentHashMap<Address, Channel>();
@@ -45,6 +47,8 @@ public class NettyTransport implements Transport {
      * @param message
      */
     private void send(Address address, String message) {
+        final String framed = message.endsWith("\n") ? message : message + "\r\n";
+
         Channel channel = connections.get(address);
         if(channel == null) {
             ChannelFuture cf = bootstrap.connect(address.getHost(), address.getPort());
@@ -61,12 +65,12 @@ public class NettyTransport implements Transport {
                     channel.closeFuture().addListener(new CloseChannelListener());
                     connections.putIfAbsent(address, channel);
 
-                    channel.writeAndFlush(message);
+                    channel.writeAndFlush(framed);
                 }
             });
 
         } else {
-            channel.writeAndFlush(message);
+            channel.writeAndFlush(framed);
         }
     }
 
@@ -96,17 +100,18 @@ public class NettyTransport implements Transport {
 
     @Override
     public byte[] sendAndReceive(Address address, byte[] payload) {
+        UUID messageId = UUID.randomUUID();
         CompletableFuture<byte[]> future = new CompletableFuture<>();
-        String text = new String(payload).replace("\r\n", "");
-        UUID messageId = UUID.fromString(text);
-        futures.putIfAbsent(messageId, future);
-        send(address, payload);
+        futures.put(messageId, future);
+
+        String text = new String(payload, StandardCharsets.UTF_8);
+        send(address, messageId + MESSAGE_ID_SEPARATOR + text);
+
         try {
            return future.get(1L * 3000, TimeUnit.MILLISECONDS);
         } catch (Exception e) {
             System.err.println(e.getMessage());
             return "1".getBytes();
         }
-        // return null;
     }
 }

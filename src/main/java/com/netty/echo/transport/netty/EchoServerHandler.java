@@ -11,7 +11,7 @@ public class EchoServerHandler extends SimpleChannelInboundHandler<String> {
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
         System.out.println("[SERVER] - " + ctx.channel().remoteAddress() + " has joined!\n");
-        ctx.write("[SERVER] - " + ctx.channel().remoteAddress() + " has joined!\n");
+        ctx.writeAndFlush("[SERVER] - " + ctx.channel().remoteAddress() + " has joined!\n");
     }
 
     @Override

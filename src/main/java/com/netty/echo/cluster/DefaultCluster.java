@@ -32,9 +32,13 @@ public class DefaultCluster implements Cluster {
     }
 
     public Node getMember(String id) {
+        if (localNode.getId().equals(id)) {
+            return localNode;
+        }
+
         return nodes
             .stream()
-            .filter(node -> node.getId() == "1")
+            .filter(node -> node.getId().equals(id))
             .findFirst()
             .orElse(null);
     }
