@@ -20,7 +20,7 @@ public class DefaultCluster implements Cluster {
     public DefaultCluster(String name, Node localNode) {
         this.name = name;
         this.localNode = localNode;
-        this.nodes = new ArrayList<Node>();
+        this.nodes = new ArrayList<>();
     }
 
     public String getName() {
@@ -32,13 +32,13 @@ public class DefaultCluster implements Cluster {
     }
 
     public Node getMember(String id) {
-        if (localNode.getId().equals(id)) {
+        if (localNode.id().equals(id)) {
             return localNode;
         }
 
         return nodes
             .stream()
-            .filter(node -> node.getId().equals(id))
+            .filter(node -> node.id().equals(id))
             .findFirst()
             .orElse(null);
     }
@@ -50,6 +50,6 @@ public class DefaultCluster implements Cluster {
 
     @Override
     public Collection<Node> getMembers() {
-        return new ArrayList<Node>(nodes);
+        return new ArrayList<>(nodes);
     }
 }

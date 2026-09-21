@@ -1,4 +1,4 @@
-FROM maven:3.9-eclipse-temurin-11 AS build
+FROM maven:3.9-eclipse-temurin-21 AS build
 
 WORKDIR /app
 
@@ -6,7 +6,7 @@ COPY pom.xml .
 COPY src ./src
 RUN --mount=type=cache,target=/root/.m2 mvn -q -B -DskipTests package dependency:copy-dependencies
 
-FROM eclipse-temurin:11-jre
+FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 

@@ -18,6 +18,8 @@ Logs from all nodes are prefixed with the node name; `Ctrl+C` or `docker compose
 
 ## How to run locally
 
+Requires JDK 21+ and Maven.
+
 ```
 mvn exec:java -Dexec.mainClass=com.netty.echo.EchoClient -Dexec.args="8080 127.0.0.1:8081 127.0.0.1:8082"
 ```
