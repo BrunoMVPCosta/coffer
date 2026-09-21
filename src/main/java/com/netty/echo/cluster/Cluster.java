@@ -36,4 +36,8 @@ public interface Cluster {
      * @param node
      */
     void addMember(Node node);
+
+    void removeMember(String id);
+
+    void setMembers(Collection<Node> members);
 }

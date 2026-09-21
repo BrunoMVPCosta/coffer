@@ -1,15 +1,18 @@
 package com.netty.echo;
 
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 
 import com.netty.echo.cluster.Cluster;
+import com.netty.echo.cluster.ClusterService;
 import com.netty.echo.cluster.DefaultCluster;
 import com.netty.echo.cluster.Node;
 import com.netty.echo.net.Address;
-
 import com.netty.echo.transport.Transport;
 import com.netty.echo.transport.netty.EchoClientInitializer;
 import com.netty.echo.transport.netty.EchoServerInitializer;
@@ -40,10 +43,15 @@ public class EchoClient {
         while(true)
         {
             for (var node : cluster.getMembers()) {
-                var address = Address.from("%s:%d".formatted(node.host(), node.port()));
-                var message = UUID.randomUUID().toString() + "\r\n";
-                byte[] response = transport.sendAndReceive(address, message.getBytes());
-                System.out.println("Received: " + new String(response));
+                var address = new Address(node.host(), node.port());
+                var message = UUID.randomUUID().toString();
+
+                try {
+                    var response = transport.sendAndReceive(address, message.getBytes(StandardCharsets.UTF_8)).get();
+                    System.out.println("Received: " + new String(response, StandardCharsets.UTF_8));
+                } catch (Exception ex) {
+                    System.out.println("[CLIENT] - No response from " + node.id());
+                }
             }
             Thread.sleep(2 * 1000);
         }
@@ -56,22 +64,18 @@ public class EchoClient {
         }
 
         int localPort = Integer.parseInt(args[0]);
-        var localNode = new Node("local-node", "127.0.0.1", localPort);
+        var localHost = advertisedHost();
+        var localNode = new Node(localHost + ":" + localPort, localHost, localPort);
 
-        var cluster = new DefaultCluster(localNode);
+        var clusterName = System.getenv().getOrDefault("CLUSTER_NAME", "netty-cluster");
+        var cluster = new DefaultCluster(clusterName, localNode);
 
+        var seeds = new ArrayList<Address>();
         for(int i = 1; i < args.length; i++) {
-
-            String[] splitted = args[i].split(":");
-            String host = splitted[0];
-            int port = Integer.parseInt(splitted[1]);
-
-            var node = new Node(host, port);
-            cluster.addMember(node);
+            seeds.add(Address.from(args[i]));
         }
 
         var group = new NioEventLoopGroup();
-
         var futures = new ConcurrentHashMap<UUID, CompletableFuture<byte[]>>();
 
         var bootstrap = new Bootstrap();
@@ -86,23 +90,38 @@ public class EchoClient {
         serverBootstrap
             .group(serverGroup)
             .channel(NioServerSocketChannel.class)
-            .localAddress(new InetSocketAddress(localPort))
-            .childHandler(new EchoServerInitializer())
-            .bind(localPort);
+            .localAddress(new InetSocketAddress(localPort));
 
         var transport = new NettyTransport(bootstrap, serverBootstrap, futures);
+        var clusterService = new ClusterService(cluster, transport, seeds);
+
+        serverBootstrap
+            .childHandler(new EchoServerInitializer(clusterService))
+            .bind(localPort);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(clusterService::leave));
 
         System.out.println("Cluster information");
         System.out.println("Cluster name: " + cluster.getName());
-        System.out.println("Members: ");
-        for (var node : cluster.getMembers()) {
-            System.out.println("\tMember: " + node.id());
-            System.out.println("\t\thost: " + node.host());
-            System.out.println("\t\tport: " + node.port());
-            System.out.println("--");
+        System.out.println("Member: " + localNode.id());
+        System.out.println("Seeds: ");
+        for (var seed : seeds) {
+            System.out.println("\tSeed: " + seed.host() + ":" + seed.port());
         }
+
+        clusterService.start();
 
         var client = new EchoClient(cluster, transport);
         client.start();
+    }
+
+    private static String advertisedHost() throws Exception {
+        var host = System.getenv("NODE_HOST");
+
+        if (host == null || host.isBlank()) {
+            return InetAddress.getLocalHost().getHostAddress();
+        }
+
+        return host;
     }
 }

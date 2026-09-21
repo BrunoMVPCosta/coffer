@@ -9,6 +9,7 @@ import java.util.concurrent.TimeUnit;
 import com.google.protobuf.ByteString;
 import com.netty.echo.net.Address;
 import com.netty.echo.protocol.WireProtocol;
+import com.netty.echo.transport.MessageKind;
 import com.netty.echo.transport.Transport;
 
 import io.netty.bootstrap.Bootstrap;
@@ -32,9 +33,10 @@ public class NettyTransport implements Transport {
         this.futures = futures;
     }
 
-    public void send(Address address, byte[] payload) {
+    @Override
+    public void send(Address address, byte[] payload, MessageKind kind) {
         send(address, WireProtocol.Envelope.newBuilder()
-            .setKind(WireProtocol.Envelope.Kind.APPLICATION)
+            .setKind(toProtoKind(kind))
             .setPayload(ByteString.copyFrom(payload))
             .build());
     }
@@ -64,22 +66,25 @@ public class NettyTransport implements Transport {
     }
 
     @Override
-    public byte[] sendAndReceive(Address address, byte[] payload) {
+    public CompletableFuture<byte[]> sendAndReceive(Address address, byte[] payload, MessageKind kind) {
         var messageId = UUID.randomUUID();
         var future = new CompletableFuture<byte[]>();
         futures.put(messageId, future);
 
         send(address, WireProtocol.Envelope.newBuilder()
             .setMessageId(messageId.toString())
-            .setKind(WireProtocol.Envelope.Kind.APPLICATION)
+            .setKind(toProtoKind(kind))
             .setPayload(ByteString.copyFrom(payload))
             .build());
 
-        try {
-           return future.get(3, TimeUnit.SECONDS);
-        } catch (Exception e) {
-            System.err.println(e.getMessage());
-            return "1".getBytes();
-        }
+        return future
+            .orTimeout(3, TimeUnit.SECONDS)
+            .whenComplete((response, cause) -> futures.remove(messageId));
+    }
+
+    private WireProtocol.Envelope.Kind toProtoKind(MessageKind kind) {
+        return kind == MessageKind.CLUSTER
+            ? WireProtocol.Envelope.Kind.CLUSTER
+            : WireProtocol.Envelope.Kind.APPLICATION;
     }
 }

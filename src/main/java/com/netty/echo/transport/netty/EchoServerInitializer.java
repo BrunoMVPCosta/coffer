@@ -1,5 +1,6 @@
 package com.netty.echo.transport.netty;
 
+import com.netty.echo.cluster.ClusterMessageHandler;
 import com.netty.echo.protocol.WireProtocol;
 
 import io.netty.channel.ChannelInitializer;
@@ -19,6 +20,12 @@ public class EchoServerInitializer extends ChannelInitializer<SocketChannel> {
 
     static final int MAX_FRAME_LENGTH = 1024 * 1024;
 
+    private final ClusterMessageHandler clusterMessageHandler;
+
+    public EchoServerInitializer(ClusterMessageHandler clusterMessageHandler) {
+        this.clusterMessageHandler = clusterMessageHandler;
+    }
+
     @Override
     protected void initChannel(SocketChannel ch) throws Exception {
         ChannelPipeline pipeline = ch.pipeline();
@@ -28,7 +35,7 @@ public class EchoServerInitializer extends ChannelInitializer<SocketChannel> {
         pipeline.addLast("protobufDecoder", new ProtobufDecoder(WireProtocol.Envelope.getDefaultInstance()));
         pipeline.addLast("protobufEncoder", new ProtobufEncoder());
 
-        pipeline.addLast("handler", new EchoServerHandler());
+        pipeline.addLast("handler", new EchoServerHandler(clusterMessageHandler));
 
         pipeline.addLast("logging", new LoggingHandler(LogLevel.DEBUG));
     }

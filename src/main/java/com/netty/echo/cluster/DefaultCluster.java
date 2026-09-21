@@ -2,6 +2,8 @@ package com.netty.echo.cluster;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.UUID;
 
 /**
@@ -11,7 +13,7 @@ public class DefaultCluster implements Cluster {
 
     private final String name;
     private final Node localNode;
-    private final Collection<Node> nodes;
+    private final Map<String, Node> nodes;
 
     public DefaultCluster(Node localNode) {
         this(UUID.randomUUID().toString(), localNode);
@@ -20,7 +22,7 @@ public class DefaultCluster implements Cluster {
     public DefaultCluster(String name, Node localNode) {
         this.name = name;
         this.localNode = localNode;
-        this.nodes = new ArrayList<>();
+        this.nodes = new LinkedHashMap<>();
     }
 
     public String getName() {
@@ -31,25 +33,38 @@ public class DefaultCluster implements Cluster {
         return localNode;
     }
 
-    public Node getMember(String id) {
+    public synchronized Node getMember(String id) {
         if (localNode.id().equals(id)) {
             return localNode;
         }
 
-        return nodes
-            .stream()
-            .filter(node -> node.id().equals(id))
-            .findFirst()
-            .orElse(null);
+        return nodes.get(id);
     }
 
     @Override
-    public void addMember(Node node) {
-        this.nodes.add(node);
+    public synchronized void addMember(Node node) {
+        if (node == null || node.id().equals(localNode.id())) {
+            return;
+        }
+
+        nodes.put(node.id(), node);
     }
 
     @Override
-    public Collection<Node> getMembers() {
-        return new ArrayList<>(nodes);
+    public synchronized Collection<Node> getMembers() {
+        return new ArrayList<>(nodes.values());
+    }
+
+    @Override
+    public synchronized void removeMember(String id) {
+        nodes.remove(id);
+    }
+
+    @Override
+    public synchronized void setMembers(Collection<Node> members) {
+        nodes.clear();
+        members.stream()
+            .filter(node -> !node.id().equals(localNode.id()))
+            .forEach(node -> nodes.put(node.id(), node));
     }
 }

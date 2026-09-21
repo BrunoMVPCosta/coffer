@@ -3,17 +3,26 @@ services:
     image: netty-echo:latest
     build: .
     command: ["8080", "node2:8081", "node3:8082"]
+    environment:
+      NODE_HOST: node1
+      CLUSTER_NAME: netty-cluster
     ports:
       - "8080:8080"
 
   node2:
     image: netty-echo:latest
     command: ["8081", "node1:8080", "node3:8082"]
+    environment:
+      NODE_HOST: node2
+      CLUSTER_NAME: netty-cluster
     ports:
       - "8081:8081"
 
   node3:
     image: netty-echo:latest
     command: ["8082", "node1:8080", "node2:8081"]
+    environment:
+      NODE_HOST: node3
+      CLUSTER_NAME: netty-cluster
     ports:
       - "8082:8082"

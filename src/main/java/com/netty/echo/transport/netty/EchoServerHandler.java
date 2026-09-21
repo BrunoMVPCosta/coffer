@@ -1,6 +1,7 @@
 package com.netty.echo.transport.netty;
 
 import com.google.protobuf.ByteString;
+import com.netty.echo.cluster.ClusterMessageHandler;
 import com.netty.echo.protocol.ClusterProtocol;
 import com.netty.echo.protocol.WireProtocol;
 
@@ -11,6 +12,12 @@ import io.netty.channel.SimpleChannelInboundHandler;
  * EchoServerHandler
  */
 public class EchoServerHandler extends SimpleChannelInboundHandler<WireProtocol.Envelope> {
+
+    private final ClusterMessageHandler clusterMessageHandler;
+
+    public EchoServerHandler(ClusterMessageHandler clusterMessageHandler) {
+        this.clusterMessageHandler = clusterMessageHandler;
+    }
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
@@ -32,17 +39,35 @@ public class EchoServerHandler extends SimpleChannelInboundHandler<WireProtocol.
     @Override
     public void channelRead0(ChannelHandlerContext ctx, WireProtocol.Envelope envelope) throws Exception {
         if (envelope.getKind() == WireProtocol.Envelope.Kind.CLUSTER) {
-            var clusterMessage = ClusterProtocol.ClusterMessage.parseFrom(envelope.getPayload());
-            System.out.println("[SERVER] - Cluster message: " + clusterMessage.getPayloadCase());
+            handleClusterMessage(ctx, envelope);
             return;
         }
 
         System.out.println("[SERVER] - Received: " + envelope.getPayload().toStringUtf8());
 
+        if (envelope.getMessageId().isEmpty()) {
+            return;
+        }
+
+        respond(ctx, envelope, WireProtocol.Envelope.Kind.APPLICATION, envelope.getPayload());
+    }
+
+    private void handleClusterMessage(ChannelHandlerContext ctx, WireProtocol.Envelope envelope) throws Exception {
+        var message = ClusterProtocol.ClusterMessage.parseFrom(envelope.getPayload());
+        var response = clusterMessageHandler.handle(message);
+
+        if (response == null || envelope.getMessageId().isEmpty()) {
+            return;
+        }
+
+        respond(ctx, envelope, WireProtocol.Envelope.Kind.CLUSTER, response.toByteString());
+    }
+
+    private void respond(ChannelHandlerContext ctx, WireProtocol.Envelope request, WireProtocol.Envelope.Kind kind, ByteString payload) {
         var response = WireProtocol.Envelope.newBuilder()
-            .setMessageId(envelope.getMessageId())
-            .setKind(WireProtocol.Envelope.Kind.APPLICATION)
-            .setPayload(envelope.getPayload())
+            .setMessageId(request.getMessageId())
+            .setKind(kind)
+            .setPayload(payload)
             .build();
 
         ctx.writeAndFlush(response);

@@ -1,5 +1,7 @@
 package com.netty.echo.transport;
 
+import java.util.concurrent.CompletableFuture;
+
 import com.netty.echo.net.Address;
 
 /**
@@ -9,7 +11,11 @@ public interface Transport {
     /**
      * Send a message to a specific address
      */
-    void send(Address address, byte[] payload);
+    default void send(Address address, byte[] payload) {
+        send(address, payload, MessageKind.APPLICATION);
+    }
+
+    void send(Address address, byte[] payload, MessageKind kind);
 
     /**
      * Send and waits for the reply
@@ -17,5 +23,9 @@ public interface Transport {
      * @param payload
      * @return
      */
-    byte[] sendAndReceive(Address address, byte[] payload);
+    default CompletableFuture<byte[]> sendAndReceive(Address address, byte[] payload) {
+        return sendAndReceive(address, payload, MessageKind.APPLICATION);
+    }
+
+    CompletableFuture<byte[]> sendAndReceive(Address address, byte[] payload, MessageKind kind);
 }
