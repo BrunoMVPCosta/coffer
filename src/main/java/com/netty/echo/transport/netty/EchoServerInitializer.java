@@ -2,6 +2,7 @@ package com.netty.echo.transport.netty;
 
 import com.netty.echo.cluster.ClusterMessageHandler;
 import com.netty.echo.protocol.WireProtocol;
+import com.netty.echo.raft.RaftMessageHandler;
 
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelPipeline;
@@ -21,9 +22,11 @@ public class EchoServerInitializer extends ChannelInitializer<SocketChannel> {
     static final int MAX_FRAME_LENGTH = 1024 * 1024;
 
     private final ClusterMessageHandler clusterMessageHandler;
+    private final RaftMessageHandler raftMessageHandler;
 
-    public EchoServerInitializer(ClusterMessageHandler clusterMessageHandler) {
+    public EchoServerInitializer(ClusterMessageHandler clusterMessageHandler, RaftMessageHandler raftMessageHandler) {
         this.clusterMessageHandler = clusterMessageHandler;
+        this.raftMessageHandler = raftMessageHandler;
     }
 
     @Override
@@ -35,7 +38,7 @@ public class EchoServerInitializer extends ChannelInitializer<SocketChannel> {
         pipeline.addLast("protobufDecoder", new ProtobufDecoder(WireProtocol.Envelope.getDefaultInstance()));
         pipeline.addLast("protobufEncoder", new ProtobufEncoder());
 
-        pipeline.addLast("handler", new EchoServerHandler(clusterMessageHandler));
+        pipeline.addLast("handler", new EchoServerHandler(clusterMessageHandler, raftMessageHandler));
 
         pipeline.addLast("logging", new LoggingHandler(LogLevel.DEBUG));
     }

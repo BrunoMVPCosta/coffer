@@ -2,6 +2,9 @@ Not sure what is this yet.
 
 Future work:
  - Add integration tests to the transport layer
+ - Persist the Raft term, vote and log so a restart keeps consensus state
+ - Build the key-value state machine on top of the Raft log
+ - Add snapshots/compaction and linearizable reads (ReadIndex or leader lease)
 
 ## Discovery
 
@@ -39,6 +42,26 @@ reused while it is active; after a close or a failed write the next message
 reopens it. Concurrent callers racing to the same address share a single
 in-flight connect attempt, and requests fail fast when the connect fails instead
 of waiting for the request timeout.
+
+## Raft
+
+`RaftService` runs leader election, heartbeats and log replication over the
+same transport:
+
+- roles are `FOLLOWER`, `CANDIDATE` and `LEADER`; elections use randomized
+  timeouts and a term-based `RequestVote` RPC
+- the leader sends `AppendEntries` heartbeats every 300ms and also uses them to
+  replicate log entries
+- followers truncate conflicting entries, append new ones and advance their
+  commit index from `leaderCommit`
+- a committed entry is handed to the registered applier in log order, which is
+  the hook for a state machine such as a key-value store
+- membership comes from `ClusterService`; Raft assumes a stable configuration
+  and does not change it itself
+
+Raft state (term, vote, log) is in memory for now, and elections are delayed by
+a short discovery grace period so a node has a chance to learn its peers before
+campaigning.
 
 ## How to run with Docker
 

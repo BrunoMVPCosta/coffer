@@ -3,7 +3,9 @@ package com.netty.echo.transport.netty;
 import com.google.protobuf.ByteString;
 import com.netty.echo.cluster.ClusterMessageHandler;
 import com.netty.echo.protocol.ClusterProtocol;
+import com.netty.echo.protocol.RaftProtocol;
 import com.netty.echo.protocol.WireProtocol;
+import com.netty.echo.raft.RaftMessageHandler;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
@@ -14,9 +16,11 @@ import io.netty.channel.SimpleChannelInboundHandler;
 public class EchoServerHandler extends SimpleChannelInboundHandler<WireProtocol.Envelope> {
 
     private final ClusterMessageHandler clusterMessageHandler;
+    private final RaftMessageHandler raftMessageHandler;
 
-    public EchoServerHandler(ClusterMessageHandler clusterMessageHandler) {
+    public EchoServerHandler(ClusterMessageHandler clusterMessageHandler, RaftMessageHandler raftMessageHandler) {
         this.clusterMessageHandler = clusterMessageHandler;
+        this.raftMessageHandler = raftMessageHandler;
     }
 
     @Override
@@ -43,6 +47,11 @@ public class EchoServerHandler extends SimpleChannelInboundHandler<WireProtocol.
             return;
         }
 
+        if (envelope.getKind() == WireProtocol.Envelope.Kind.RAFT) {
+            handleRaftMessage(ctx, envelope);
+            return;
+        }
+
         System.out.println("[SERVER] - Received: " + envelope.getPayload().toStringUtf8());
 
         if (envelope.getMessageId().isEmpty()) {
@@ -61,6 +70,17 @@ public class EchoServerHandler extends SimpleChannelInboundHandler<WireProtocol.
         }
 
         respond(ctx, envelope, WireProtocol.Envelope.Kind.CLUSTER, response.toByteString());
+    }
+
+    private void handleRaftMessage(ChannelHandlerContext ctx, WireProtocol.Envelope envelope) throws Exception {
+        var message = RaftProtocol.RaftMessage.parseFrom(envelope.getPayload());
+        var response = raftMessageHandler.handle(message);
+
+        if (response == null || envelope.getMessageId().isEmpty()) {
+            return;
+        }
+
+        respond(ctx, envelope, WireProtocol.Envelope.Kind.RAFT, response.toByteString());
     }
 
     private void respond(ChannelHandlerContext ctx, WireProtocol.Envelope request, WireProtocol.Envelope.Kind kind, ByteString payload) {

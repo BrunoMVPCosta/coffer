@@ -13,6 +13,7 @@ import com.netty.echo.cluster.ClusterService;
 import com.netty.echo.cluster.DefaultCluster;
 import com.netty.echo.cluster.Node;
 import com.netty.echo.net.Address;
+import com.netty.echo.raft.RaftService;
 import com.netty.echo.transport.Transport;
 import com.netty.echo.transport.netty.EchoClientInitializer;
 import com.netty.echo.transport.netty.EchoServerInitializer;
@@ -101,12 +102,16 @@ public class EchoClient {
 
         var transport = new NettyTransport(bootstrap, serverBootstrap, futures);
         var clusterService = new ClusterService(cluster, transport, seeds);
+        var raftService = new RaftService(cluster, transport);
 
         serverBootstrap
-            .childHandler(new EchoServerInitializer(clusterService))
+            .childHandler(new EchoServerInitializer(clusterService, raftService))
             .bind(localPort);
 
-        Runtime.getRuntime().addShutdownHook(new Thread(clusterService::leave));
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            raftService.stop();
+            clusterService.leave();
+        }));
 
         System.out.println("Cluster information");
         System.out.println("Cluster name: " + cluster.getName());
@@ -117,6 +122,7 @@ public class EchoClient {
         }
 
         clusterService.start();
+        raftService.start();
 
         var client = new EchoClient(cluster, transport);
         client.start();

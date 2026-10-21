@@ -10,6 +10,7 @@ message Envelope {
     KIND_UNSPECIFIED = 0;
     APPLICATION = 1;
     CLUSTER = 2;
+    RAFT = 3;
   }
 
   string message_id = 1;

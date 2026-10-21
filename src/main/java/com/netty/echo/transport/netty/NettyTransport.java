@@ -149,8 +149,10 @@ public class NettyTransport implements Transport {
     }
 
     private WireProtocol.Envelope.Kind toProtoKind(MessageKind kind) {
-        return kind == MessageKind.CLUSTER
-            ? WireProtocol.Envelope.Kind.CLUSTER
-            : WireProtocol.Envelope.Kind.APPLICATION;
+        return switch (kind) {
+            case CLUSTER -> WireProtocol.Envelope.Kind.CLUSTER;
+            case RAFT -> WireProtocol.Envelope.Kind.RAFT;
+            case APPLICATION -> WireProtocol.Envelope.Kind.APPLICATION;
+        };
     }
 }

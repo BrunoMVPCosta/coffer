@@ -5,6 +5,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentMap;
 
 import com.netty.echo.protocol.ClusterProtocol;
+import com.netty.echo.protocol.RaftProtocol;
 import com.netty.echo.protocol.WireProtocol;
 
 import io.netty.channel.ChannelHandlerContext;
@@ -34,6 +35,12 @@ public class EchoClientHandler extends SimpleChannelInboundHandler<WireProtocol.
         if (envelope.getKind() == WireProtocol.Envelope.Kind.CLUSTER) {
             var clusterMessage = ClusterProtocol.ClusterMessage.parseFrom(envelope.getPayload());
             System.out.println("[CLIENT] - Cluster message: " + clusterMessage.getPayloadCase());
+            return;
+        }
+
+        if (envelope.getKind() == WireProtocol.Envelope.Kind.RAFT) {
+            var raftMessage = RaftProtocol.RaftMessage.parseFrom(envelope.getPayload());
+            System.out.println("[CLIENT] - Raft message: " + raftMessage.getPayloadCase());
             return;
         }
 
