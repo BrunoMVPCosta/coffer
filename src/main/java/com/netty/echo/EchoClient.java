@@ -102,7 +102,18 @@ public class EchoClient {
 
         var transport = new NettyTransport(bootstrap, serverBootstrap, futures);
         var clusterService = new ClusterService(cluster, transport, seeds);
-        var raftService = new RaftService(cluster, transport);
+
+        // Static Raft configuration: the seed roster is the authoritative
+        // cluster. Every node must be given the same peers.
+        var raftPeers = new ArrayList<Node>();
+        for (var seed : seeds) {
+            var peerId = seed.host() + ":" + seed.port();
+            if (!peerId.equals(localNode.id())) {
+                raftPeers.add(new Node(peerId, seed.host(), seed.port()));
+            }
+        }
+
+        var raftService = new RaftService(localNode, raftPeers, transport);
 
         serverBootstrap
             .childHandler(new EchoServerInitializer(clusterService, raftService))
@@ -128,8 +139,7 @@ public class EchoClient {
         client.start();
     }
 
-    private static String advertisedHost() throws Exception {
-        var host = System.getenv("NODE_HOST");
+    private static String advertisedHost() throws Exception {        var host = System.getenv("NODE_HOST");
 
         if (host == null || host.isBlank()) {
             return InetAddress.getLocalHost().getHostAddress();

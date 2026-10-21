@@ -56,11 +56,15 @@ same transport:
   commit index from `leaderCommit`
 - a committed entry is handed to the registered applier in log order, which is
   the hook for a state machine such as a key-value store
-- membership comes from `ClusterService`; Raft assumes a stable configuration
-  and does not change it itself
+- the Raft configuration is the **seed roster**, fixed for the lifetime of the
+  process: every node must be given the same peers, and quorum is computed from
+  that roster only. Discovery still maintains the address book and liveness
+  hints, but later membership changes never shrink the majority needed to
+  commit. Adding or removing a node requires restarting the cluster with the
+  new roster (until Raft configuration changes are implemented)
 
-Raft state (term, vote, log) is in memory for now, and elections are delayed by
-a short discovery grace period so a node has a chance to learn its peers before
+Raft state (term, vote, log) is in memory for now. Elections are delayed by a
+short discovery grace period so a node has a chance to learn its peers before
 campaigning.
 
 ## How to run with Docker

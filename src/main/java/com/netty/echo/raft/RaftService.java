@@ -13,10 +13,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.function.LongSupplier;
-
-import com.google.protobuf.InvalidProtocolBufferException;
-import com.netty.echo.cluster.Cluster;
+import java.util.function.LongSupplier;import com.google.protobuf.InvalidProtocolBufferException;
 import com.netty.echo.cluster.Node;
 import com.netty.echo.net.Address;
 import com.netty.echo.protocol.RaftProtocol;
@@ -27,9 +24,10 @@ import com.netty.echo.transport.Transport;
  * A Raft node.
  *
  * <p>This class implements leader election, heartbeats and log replication on
- * top of {@link Transport}. Membership comes from {@link Cluster}; Raft never
- * changes the cluster configuration itself. All state is guarded by the
- * intrinsic lock so that timer ticks and network callbacks can share it.</p>
+ * top of {@link Transport}. The Raft configuration is supplied explicitly
+ * (normally the seed roster) and never changes; Raft never derives quorum from
+ * live discovery. All state is guarded by the intrinsic lock so that timer
+ * ticks and network callbacks can share it.</p>
  *
  * <p>The log is 1-based (index {@code i} lives at list position {@code i - 1}).
  * Index 0 means "empty" and has term 0.</p>
@@ -48,7 +46,7 @@ public class RaftService implements RaftMessageHandler {
     private static final long DISCOVERY_GRACE_MS = 3000;
     private static final long TICK_MS = 50;
 
-    private final Cluster cluster;
+    private final Node self;
     private final Transport transport;
     private final long heartbeatMs;
     private final long electionMinMs;
@@ -76,14 +74,22 @@ public class RaftService implements RaftMessageHandler {
     private long nextHeartbeatMs;
     private Consumer<RaftProtocol.LogEntry> applier = entry -> { };
 
-    public RaftService(Cluster cluster, Transport transport) {
-        this(cluster, transport,
+    /**
+     * Immutable Raft configuration (peers, excluding the local node). Passing a
+     * roster that differs from another node's roster breaks quorum safety, so
+     * every node must be given the same set of peers.
+     */
+    private final List<Node> configuration;
+
+    public RaftService(Node self, Collection<Node> peers, Transport transport) {
+        this(self, peers, transport,
             DEFAULT_HEARTBEAT_MS, DEFAULT_ELECTION_MIN_MS, DEFAULT_ELECTION_MAX_MS,
             System::currentTimeMillis, new Random());
     }
 
     RaftService(
-        Cluster cluster,
+        Node self,
+        Collection<Node> peers,
         Transport transport,
         long heartbeatMs,
         long electionMinMs,
@@ -91,18 +97,23 @@ public class RaftService implements RaftMessageHandler {
         LongSupplier clock,
         Random random) {
 
-        this.cluster = Objects.requireNonNull(cluster);
+        this.self = Objects.requireNonNull(self);
         this.transport = Objects.requireNonNull(transport);
         this.heartbeatMs = heartbeatMs;
         this.electionMinMs = electionMinMs;
         this.electionMaxMs = electionMaxMs;
         this.clock = Objects.requireNonNull(clock);
         this.random = Objects.requireNonNull(random);
+        this.configuration = peers.stream()
+            .filter(node -> !node.id().equals(self.id()))
+            .distinct()
+            .toList();
 
         this.electionDeadlineMs = clock.getAsLong() + DISCOVERY_GRACE_MS + electionTimeoutMs();
     }
 
     public synchronized void start() {
+        log("configuration: " + configuration.stream().map(Node::id).toList());
         scheduler.scheduleWithFixedDelay(this::tickSafely, TICK_MS, TICK_MS, TimeUnit.MILLISECONDS);
     }
 
@@ -443,15 +454,15 @@ public class RaftService implements RaftMessageHandler {
     }
 
     private int quorum() {
-        return (cluster.getMembers().size() + 1) / 2 + 1;
+        return (configuration.size() + 1) / 2 + 1;
     }
 
-    private Collection<Node> peers() {
-        return cluster.getMembers();
+    private List<Node> peers() {
+        return configuration;
     }
 
     private String selfId() {
-        return cluster.getMember().id();
+        return self.id();
     }
 
     private void resetElectionTimeout() {

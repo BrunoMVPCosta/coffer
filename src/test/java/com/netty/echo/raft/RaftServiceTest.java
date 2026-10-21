@@ -13,7 +13,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.atomic.AtomicLong;
 
-import com.netty.echo.cluster.DefaultCluster;
 import com.netty.echo.cluster.Node;
 import com.netty.echo.net.Address;
 import com.netty.echo.protocol.RaftProtocol;
@@ -30,11 +29,9 @@ class RaftServiceTest {
     private static final Node PEER2 = new Node("n2", "127.0.0.1", 8081);
     private static final Node PEER3 = new Node("n3", "127.0.0.1", 8082);
 
-    private final DefaultCluster cluster = new DefaultCluster("test-cluster", LOCAL);
     private final FakeTransport transport = new FakeTransport();
     private final AtomicLong clock = new AtomicLong();
-    private final RaftService raft = new RaftService(
-        cluster, transport, 50, 100, 200, clock::get, new Random(7));
+    private RaftService raft = newRaft();
 
     @AfterEach
     void stop() {
@@ -54,8 +51,7 @@ class RaftServiceTest {
 
     @Test
     void candidateBecomesLeaderAfterWinningQuorum() {
-        cluster.addMember(PEER2);
-        cluster.addMember(PEER3);
+        raft = newRaft(PEER2, PEER3);
         afterDiscovery();
 
         raft.tick();
@@ -71,8 +67,7 @@ class RaftServiceTest {
 
     @Test
     void candidateIgnoresRejectedVotes() {
-        cluster.addMember(PEER2);
-        cluster.addMember(PEER3);
+        raft = newRaft(PEER2, PEER3);
         afterDiscovery();
 
         raft.tick();
@@ -149,8 +144,7 @@ class RaftServiceTest {
 
     @Test
     void leaderReplicatesEntryAndCommitsOnMajority() {
-        cluster.addMember(PEER2);
-        cluster.addMember(PEER3);
+        raft = newRaft(PEER2, PEER3);
         afterDiscovery();
         raft.tick();
         transport.completeVote(PEER2, 1, true);
@@ -173,6 +167,29 @@ class RaftServiceTest {
     @Test
     void appendFailsWhenNotLeader() {
         assertThrows(IllegalStateException.class, () -> raft.append(bytes("a")));
+    }
+
+    @Test
+    void candidateCannotWinWithOnlyOnePeerInFiveNodeCluster() {
+        var peer4 = new Node("n4", "127.0.0.1", 8083);
+        var peer5 = new Node("n5", "127.0.0.1", 8084);
+        raft = newRaft(PEER2, PEER3, peer4, peer5);
+        afterDiscovery();
+
+        raft.tick();
+        assertEquals(Role.CANDIDATE, raft.role());
+        assertEquals(4, transport.lastRequests().size());
+
+        transport.completeVote(PEER2, 1, true);
+        assertEquals(Role.CANDIDATE, raft.role());
+
+        transport.completeVote(PEER3, 1, true);
+        assertTrue(raft.isLeader());
+    }
+
+    private RaftService newRaft(Node... peers) {
+        return new RaftService(
+            LOCAL, List.of(peers), transport, 50, 100, 200, clock::get, new Random(7));
     }
 
     private void afterDiscovery() {
