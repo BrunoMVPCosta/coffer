@@ -9,11 +9,14 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
-import java.util.function.LongSupplier;import com.google.protobuf.InvalidProtocolBufferException;
+import java.util.function.LongSupplier;
+
+import com.google.protobuf.InvalidProtocolBufferException;
 import com.netty.echo.cluster.Node;
 import com.netty.echo.net.Address;
 import com.netty.echo.protocol.RaftProtocol;
@@ -62,7 +65,9 @@ public class RaftService implements RaftMessageHandler {
     private final List<RaftProtocol.LogEntry> log = new ArrayList<>();
     private final Map<String, Long> nextIndex = new HashMap<>();
     private final Map<String, Long> matchIndex = new HashMap<>();
+    private final Map<Long, CompletableFuture<Long>> applyWaiters = new HashMap<>();
     private final Set<String> votesGranted = new HashSet<>();
+    private final RaftStorage storage;
 
     private Role role = Role.FOLLOWER;
     private long currentTerm;
@@ -81,8 +86,8 @@ public class RaftService implements RaftMessageHandler {
      */
     private final List<Node> configuration;
 
-    public RaftService(Node self, Collection<Node> peers, Transport transport) {
-        this(self, peers, transport,
+    public RaftService(Node self, Collection<Node> peers, Transport transport, RaftStorage storage) {
+        this(self, peers, transport, storage,
             DEFAULT_HEARTBEAT_MS, DEFAULT_ELECTION_MIN_MS, DEFAULT_ELECTION_MAX_MS,
             System::currentTimeMillis, new Random());
     }
@@ -91,6 +96,7 @@ public class RaftService implements RaftMessageHandler {
         Node self,
         Collection<Node> peers,
         Transport transport,
+        RaftStorage storage,
         long heartbeatMs,
         long electionMinMs,
         long electionMaxMs,
@@ -99,6 +105,7 @@ public class RaftService implements RaftMessageHandler {
 
         this.self = Objects.requireNonNull(self);
         this.transport = Objects.requireNonNull(transport);
+        this.storage = Objects.requireNonNull(storage);
         this.heartbeatMs = heartbeatMs;
         this.electionMinMs = electionMinMs;
         this.electionMaxMs = electionMaxMs;
@@ -109,6 +116,19 @@ public class RaftService implements RaftMessageHandler {
             .distinct()
             .toList();
 
+        var state = storage.load();
+        this.currentTerm = state.getCurrentTerm();
+        this.votedFor = state.getVotedFor().isEmpty() ? null : state.getVotedFor();
+
+        for (var entry : state.getLogList()) {
+            if (entry.getIndex() != log.size() + 1) {
+                throw new IllegalStateException("Corrupt Raft log: expected index "
+                    + (log.size() + 1) + " but found " + entry.getIndex());
+            }
+            log.add(entry);
+        }
+
+        this.currentTerm = Math.max(this.currentTerm, lastLogTerm());
         this.electionDeadlineMs = clock.getAsLong() + DISCOVERY_GRACE_MS + electionTimeoutMs();
     }
 
@@ -131,20 +151,24 @@ public class RaftService implements RaftMessageHandler {
     /**
      * Appends a command to the leader's log and starts replicating it.
      *
+     * @return a future completed with the log index once the entry is applied
      * @throws IllegalStateException when this node is not the leader
      */
-    public synchronized long append(byte[] command) {
+    public synchronized CompletableFuture<Long> append(byte[] command) {
         if (role != Role.LEADER) {
             throw new IllegalStateException("not the leader: " + role);
         }
 
         var index = lastLogIndex() + 1;
+        var applied = new CompletableFuture<Long>();
+        applyWaiters.put(index, applied);
         log.add(RaftMessages.entry(index, currentTerm, command));
+        persist();
 
         advanceCommitIndex();
         sendHeartbeats();
 
-        return index;
+        return applied;
     }
 
     @Override
@@ -191,6 +215,7 @@ public class RaftService implements RaftMessageHandler {
         votesGranted.clear();
         votesGranted.add(selfId());
         resetElectionTimeout();
+        persist();
 
         log("starting election for term " + currentTerm);
 
@@ -257,6 +282,7 @@ public class RaftService implements RaftMessageHandler {
 
         votedFor = request.getCandidateId();
         resetElectionTimeout();
+        persist();
         log("voted for " + request.getCandidateId() + " in term " + currentTerm);
 
         return RaftMessages.requestVoteResponse(currentTerm, true);
@@ -281,6 +307,8 @@ public class RaftService implements RaftMessageHandler {
             return RaftMessages.appendEntriesResponse(currentTerm, false, lastLogIndex());
         }
 
+        var logChanged = false;
+
         for (var entry : request.getEntriesList()) {
             var index = entry.getIndex();
 
@@ -290,6 +318,7 @@ public class RaftService implements RaftMessageHandler {
                 }
 
                 truncateFrom(index);
+                logChanged = true;
             }
 
             if (index != lastLogIndex() + 1) {
@@ -297,11 +326,16 @@ public class RaftService implements RaftMessageHandler {
             }
 
             log.add(entry);
+            logChanged = true;
         }
 
         if (request.getLeaderCommit() > commitIndex) {
             commitIndex = Math.min(request.getLeaderCommit(), lastLogIndex());
             applyCommitted();
+        }
+
+        if (logChanged) {
+            persist();
         }
 
         return RaftMessages.appendEntriesResponse(currentTerm, true, lastLogIndex());
@@ -336,13 +370,21 @@ public class RaftService implements RaftMessageHandler {
         nextIndex.clear();
         matchIndex.clear();
 
+        var next = lastLogIndex() + 1;
+
         for (var peer : peers()) {
-            nextIndex.put(peer.id(), lastLogIndex() + 1);
+            nextIndex.put(peer.id(), next);
             matchIndex.put(peer.id(), 0L);
         }
 
+        // A no-op in the new term lets the leader commit entries left over from
+        // previous terms and proves its authority to the rest of the cluster.
+        log.add(RaftMessages.entry(next, currentTerm, new byte[0]));
+        persist();
+
         nextHeartbeatMs = 0;
         log("elected leader for term " + currentTerm);
+        advanceCommitIndex();
         sendHeartbeats();
     }
 
@@ -354,6 +396,7 @@ public class RaftService implements RaftMessageHandler {
         if (term > currentTerm) {
             currentTerm = term;
             votedFor = null;
+            persist();
         }
 
         leaderId = null;
@@ -427,14 +470,46 @@ public class RaftService implements RaftMessageHandler {
     private void applyCommitted() {
         while (lastApplied < commitIndex) {
             lastApplied++;
-            applier.accept(log.get((int) lastApplied - 1));
+            var entry = log.get((int) lastApplied - 1);
+            RuntimeException failure = null;
+
+            try {
+                applier.accept(entry);
+            } catch (RuntimeException ex) {
+                failure = ex;
+                log("applier failed at index " + entry.getIndex() + ": " + ex);
+            } finally {
+                var waiter = applyWaiters.remove(entry.getIndex());
+
+                if (waiter != null) {
+                    if (failure != null) {
+                        waiter.completeExceptionally(failure);
+                    } else {
+                        waiter.complete(entry.getIndex());
+                    }
+                }
+            }
         }
     }
 
     private void truncateFrom(long index) {
         while (lastLogIndex() >= index) {
-            log.remove(log.size() - 1);
+            var removed = log.remove(log.size() - 1);
+            var waiter = applyWaiters.remove(removed.getIndex());
+
+            if (waiter != null) {
+                waiter.completeExceptionally(
+                    new IllegalStateException("Log entry " + removed.getIndex() + " was truncated"));
+            }
         }
+    }
+
+    private void persist() {
+        storage.save(RaftProtocol.PersistentState.newBuilder()
+            .setCurrentTerm(currentTerm)
+            .setVotedFor(votedFor == null ? "" : votedFor)
+            .addAllLog(log)
+            .build());
     }
 
     private long lastLogIndex() {
@@ -484,6 +559,25 @@ public class RaftService implements RaftMessageHandler {
 
     public synchronized Role role() {
         return role;
+    }
+
+    public synchronized Node self() {
+        return self;
+    }
+
+    public synchronized Node leader() {
+        if (leaderId == null) {
+            return null;
+        }
+
+        if (leaderId.equals(self.id())) {
+            return self;
+        }
+
+        return configuration.stream()
+            .filter(node -> node.id().equals(leaderId))
+            .findFirst()
+            .orElse(null);
     }
 
     public synchronized long currentTerm() {

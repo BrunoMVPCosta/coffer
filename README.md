@@ -2,7 +2,6 @@ Not sure what is this yet.
 
 Future work:
  - Add integration tests to the transport layer
- - Persist the Raft term, vote and log so a restart keeps consensus state
  - Build the key-value state machine on top of the Raft log
  - Add snapshots/compaction and linearizable reads (ReadIndex or leader lease)
 
@@ -52,6 +51,8 @@ same transport:
   timeouts and a term-based `RequestVote` RPC
 - the leader sends `AppendEntries` heartbeats every 300ms and also uses them to
   replicate log entries
+- on election the leader appends a no-op entry in its new term, which lets it
+  commit entries left over from previous terms
 - followers truncate conflicting entries, append new ones and advance their
   commit index from `leaderCommit`
 - a committed entry is handed to the registered applier in log order, which is
@@ -63,9 +64,21 @@ same transport:
   commit. Adding or removing a node requires restarting the cluster with the
   new roster (until Raft configuration changes are implemented)
 
-Raft state (term, vote, log) is in memory for now. Elections are delayed by a
-short discovery grace period so a node has a chance to learn its peers before
-campaigning.
+### Persistence
+
+The term, vote and log are written to disk through `RaftStorage`.
+`FileRaftStorage` keeps them in `raft-state.bin` and replaces the file
+atomically (write to a temporary file, force it, then rename). The whole log is
+rewritten on every change, which is acceptable for a small cluster and a known
+limitation until snapshots arrive.
+
+The data directory comes from `RAFT_DATA_DIR` (default `data/`) and gets one
+subdirectory per node id. Docker Compose mounts a named volume per node at
+`/data`, so a `docker compose down` followed by `up` keeps the Raft state.
+Deleting a node's directory resets it.
+
+Elections are delayed by a short discovery grace period so a node has a chance
+to learn its peers before campaigning.
 
 ## How to run with Docker
 

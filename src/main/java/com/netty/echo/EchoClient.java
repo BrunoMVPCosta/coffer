@@ -3,6 +3,7 @@ package com.netty.echo;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -13,6 +14,7 @@ import com.netty.echo.cluster.ClusterService;
 import com.netty.echo.cluster.DefaultCluster;
 import com.netty.echo.cluster.Node;
 import com.netty.echo.net.Address;
+import com.netty.echo.raft.FileRaftStorage;
 import com.netty.echo.raft.RaftService;
 import com.netty.echo.transport.Transport;
 import com.netty.echo.transport.netty.EchoClientInitializer;
@@ -113,7 +115,8 @@ public class EchoClient {
             }
         }
 
-        var raftService = new RaftService(localNode, raftPeers, transport);
+        var raftService = new RaftService(localNode, raftPeers, transport,
+            new FileRaftStorage(raftDataDirectory(localNode)));
 
         serverBootstrap
             .childHandler(new EchoServerInitializer(clusterService, raftService))
@@ -131,12 +134,18 @@ public class EchoClient {
         for (var seed : seeds) {
             System.out.println("\tSeed: " + seed.host() + ":" + seed.port());
         }
+        System.out.println("Raft state: " + raftDataDirectory(localNode).toAbsolutePath());
 
         clusterService.start();
         raftService.start();
 
         var client = new EchoClient(cluster, transport);
         client.start();
+    }
+
+    private static Path raftDataDirectory(Node localNode) {
+        var root = Path.of(System.getenv().getOrDefault("RAFT_DATA_DIR", "data"));
+        return root.resolve(localNode.id().replace(':', '_'));
     }
 
     private static String advertisedHost() throws Exception {        var host = System.getenv("NODE_HOST");

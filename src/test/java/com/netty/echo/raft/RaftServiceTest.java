@@ -31,6 +31,7 @@ class RaftServiceTest {
 
     private final FakeTransport transport = new FakeTransport();
     private final AtomicLong clock = new AtomicLong();
+    private final InMemoryRaftStorage storage = new InMemoryRaftStorage();
     private RaftService raft = newRaft();
 
     @AfterEach
@@ -47,6 +48,8 @@ class RaftServiceTest {
         assertTrue(raft.isLeader());
         assertEquals(1, raft.currentTerm());
         assertEquals(LOCAL.id(), raft.leaderId());
+        assertEquals(1, raft.logSize());
+        assertEquals(1, raft.commitIndex());
     }
 
     @Test
@@ -143,7 +146,7 @@ class RaftServiceTest {
     }
 
     @Test
-    void leaderReplicatesEntryAndCommitsOnMajority() {
+    void leaderReplicatesEntryAndCommitsOnMajority() throws Exception {
         raft = newRaft(PEER2, PEER3);
         afterDiscovery();
         raft.tick();
@@ -153,20 +156,48 @@ class RaftServiceTest {
         var applied = new ArrayList<RaftProtocol.LogEntry>();
         raft.setApplier(applied::add);
 
-        raft.append(bytes("set a=1"));
+        var appliedFuture = raft.append(bytes("set a=1"));
 
         assertEquals(0, raft.commitIndex());
+        assertFalse(appliedFuture.isDone());
 
-        transport.completeAppend(PEER2, 1, true, 1);
+        transport.completeAppend(PEER2, 1, true, 2);
 
-        assertEquals(1, raft.commitIndex());
-        assertEquals(1, applied.size());
-        assertEquals("set a=1", applied.get(0).getCommand().toStringUtf8());
+        assertEquals(2, raft.commitIndex());
+        assertEquals(2, applied.size());
+        assertEquals("", applied.get(0).getCommand().toStringUtf8());
+        assertEquals("set a=1", applied.get(1).getCommand().toStringUtf8());
+        assertEquals(2L, appliedFuture.get());
     }
 
     @Test
     void appendFailsWhenNotLeader() {
         assertThrows(IllegalStateException.class, () -> raft.append(bytes("a")));
+    }
+
+    @Test
+    void termAndVoteSurviveRestart() {
+        var granted = raft.handle(RaftMessages.requestVote(5, PEER2.id(), 0, 0));
+        assertTrue(granted.getRequestVoteResponse().getVoteGranted());
+
+        raft = newRaft();
+
+        assertEquals(5, raft.currentTerm());
+
+        var denied = raft.handle(RaftMessages.requestVote(5, PEER3.id(), 0, 0));
+
+        assertFalse(denied.getRequestVoteResponse().getVoteGranted());
+    }
+
+    @Test
+    void logSurvivesRestart() {
+        raft.handle(RaftMessages.appendEntries(1, PEER2.id(), 0, 0,
+            List.of(RaftMessages.entry(1, 1, bytes("a")), RaftMessages.entry(2, 1, bytes("b"))), 0));
+
+        raft = newRaft();
+
+        assertEquals(2, raft.logSize());
+        assertEquals(1, raft.logLastTerm());
     }
 
     @Test
@@ -189,7 +220,7 @@ class RaftServiceTest {
 
     private RaftService newRaft(Node... peers) {
         return new RaftService(
-            LOCAL, List.of(peers), transport, 50, 100, 200, clock::get, new Random(7));
+            LOCAL, List.of(peers), transport, storage, 50, 100, 200, clock::get, new Random(7));
     }
 
     private void afterDiscovery() {

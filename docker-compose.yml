@@ -6,6 +6,9 @@ services:
     environment:
       NODE_HOST: node1
       CLUSTER_NAME: netty-cluster
+      RAFT_DATA_DIR: /data
+    volumes:
+      - node1-data:/data
     ports:
       - "8080:8080"
 
@@ -15,6 +18,9 @@ services:
     environment:
       NODE_HOST: node2
       CLUSTER_NAME: netty-cluster
+      RAFT_DATA_DIR: /data
+    volumes:
+      - node2-data:/data
     ports:
       - "8081:8081"
 
@@ -24,5 +30,13 @@ services:
     environment:
       NODE_HOST: node3
       CLUSTER_NAME: netty-cluster
+      RAFT_DATA_DIR: /data
+    volumes:
+      - node3-data:/data
     ports:
       - "8082:8082"
+
+volumes:
+  node1-data:
+  node2-data:
+  node3-data:

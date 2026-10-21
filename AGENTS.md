@@ -56,8 +56,12 @@ Stop it with `docker compose down`.
   (`DEAD` over `SUSPECT` over `ALIVE`). Dead nodes stay as tombstones.
 - The transport pools one connection per address. Use `sendAndReceive` for RPC
   and `send` for fire-and-forget messages.
-- Raft state (term, vote, log) is in memory. Do not claim durability that does
-  not exist.
+- Raft term, vote and log are persisted through `RaftStorage`.
+  `FileRaftStorage` rewrites the whole log atomically; there is no separate
+  write-ahead log yet. The commit index and the state machine are rebuilt from
+  the log, so do not introduce a second source of truth.
+- The leader appends a no-op entry when elected; state machines must ignore
+  empty commands.
 - `RaftService` state is guarded by `synchronized`; network callbacks may run on
   Netty threads. Keep state mutations inside the lock.
 - Prefer Java 21 features already in use (`record`, `var`, switch expressions)

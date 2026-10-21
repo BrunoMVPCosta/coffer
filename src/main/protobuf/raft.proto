@@ -46,3 +46,9 @@ message RaftMessage {
     AppendEntriesResponse append_entries_response = 4;
   }
 }
+
+message PersistentState {
+  uint64 current_term = 1;
+  string voted_for = 2;
+  repeated LogEntry log = 3;
+}
