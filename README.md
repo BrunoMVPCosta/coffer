@@ -2,8 +2,6 @@ Not sure what is this yet.
 
 Future work:
  - Add integration tests to the transport layer
- - Add pooled connections to the address and validate if the channel is still good or exists before sending new message
- - Add incarnation numbers to membership so concurrent updates converge deterministically
 
 ## Discovery
 
@@ -15,6 +13,32 @@ Nodes start with a list of seed addresses and discover the rest of the cluster a
 - a node that shuts down cleanly broadcasts `LEAVE`
 
 Each node advertises itself as `host:port`, where the host comes from the `NODE_HOST` environment variable (or the local address when unset) and the cluster name from `CLUSTER_NAME` (default `netty-cluster`).
+
+## Membership
+
+Every node advertises the same identity plus two pieces of membership metadata:
+
+- an **incarnation** number, owned by the node itself and initialised from the
+  wall clock so a restarted process outranks the tombstone of its previous run
+- a **state**: `ALIVE`, `SUSPECT` or `DEAD`
+
+Membership updates are merged with last-writer-wins semantics: a higher
+incarnation always wins; at the same incarnation a higher state wins (`DEAD`
+over `SUSPECT` over `ALIVE`). This makes concurrent updates converge
+deterministically and stops a delayed message from resurrecting a dead node.
+
+A dead node is kept as a **tombstone** for five minutes. If a node hears that it
+is dead or suspected, it increments its own incarnation and gossips `ALIVE`
+again. Nodes exchange their full membership view with every heartbeat
+(anti-entropy), so a lost update is repaired on the next round.
+
+## Connections
+
+The transport keeps one pooled connection per peer address. A connection is
+reused while it is active; after a close or a failed write the next message
+reopens it. Concurrent callers racing to the same address share a single
+in-flight connect attempt, and requests fail fast when the connect fails instead
+of waiting for the request timeout.
 
 ## How to run with Docker
 

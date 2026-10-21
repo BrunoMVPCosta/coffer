@@ -1,6 +1,7 @@
 package com.netty.echo.cluster;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.util.List;
@@ -28,13 +29,14 @@ class ClusterServiceTest {
     void joinAddsMemberAndReturnsWelcomeWithAllMembers() {
         var service = new ClusterService(cluster, transport, List.of());
 
-        var response = service.handle(ClusterMessages.join("test-cluster", remote));
+        var response = service.handle(ClusterMessages.join("test-cluster", Member.of(remote)));
 
         assertTrue(response.hasWelcome());
         assertEquals(remote, cluster.getMember(remote.id()));
 
         var members = response.getWelcome().getMembersList().stream()
-            .map(ClusterMessages::fromProto)
+            .map(ClusterMessages::memberFromProto)
+            .map(Member::node)
             .toList();
 
         assertEquals(List.of(local, remote), members);
@@ -45,7 +47,7 @@ class ClusterServiceTest {
         cluster.addMember(new Node("10.0.0.3:8082", "10.0.0.3", 8082));
         var service = new ClusterService(cluster, transport, List.of());
 
-        service.handle(ClusterMessages.join("test-cluster", remote));
+        service.handle(ClusterMessages.join("test-cluster", Member.of(remote)));
 
         assertEquals(2, transport.sent.size());
         var pushed = ClusterProtocol.ClusterMessage.parseFrom(transport.sent.get(0).payload());
@@ -56,17 +58,17 @@ class ClusterServiceTest {
     void pingIsAnsweredWithPong() {
         var service = new ClusterService(cluster, transport, List.of());
 
-        var response = service.handle(ClusterMessages.ping(remote));
+        var response = service.handle(ClusterMessages.ping(Member.of(remote)));
 
         assertTrue(response.hasPong());
         assertEquals(local.id(), response.getPong().getSender().getId());
     }
 
     @Test
-    void membersMessageReplacesMembers() {
+    void membersMessageMergesMembers() {
         var service = new ClusterService(cluster, transport, List.of());
 
-        service.handle(ClusterMessages.members("test-cluster", List.of(remote)));
+        service.handle(ClusterMessages.members("test-cluster", List.of(Member.of(remote))));
 
         assertEquals(List.of(remote), cluster.getMembers());
     }
@@ -76,15 +78,49 @@ class ClusterServiceTest {
         cluster.addMember(remote);
         var service = new ClusterService(cluster, transport, List.of());
 
-        service.handle(ClusterMessages.leave(remote.id()));
+        service.handle(ClusterMessages.leave(Member.of(remote)));
 
         assertTrue(cluster.getMembers().isEmpty());
     }
 
     @Test
+    void staleMembersMessageDoesNotResurrectDeadMember() {
+        cluster.addMember(remote);
+        var service = new ClusterService(cluster, transport, List.of());
+
+        service.handle(ClusterMessages.leave(Member.of(remote)));
+        service.handle(ClusterMessages.members("test-cluster", List.of(Member.of(remote))));
+
+        assertTrue(cluster.getMembers().isEmpty());
+        assertNull(cluster.getMember(remote.id()));
+    }
+
+    @Test
+    void membersMessageWithHigherIncarnationResurrectsMember() {
+        cluster.addMember(remote);
+        var service = new ClusterService(cluster, transport, List.of());
+
+        service.handle(ClusterMessages.leave(Member.of(remote)));
+        service.handle(ClusterMessages.members("test-cluster",
+            List.of(new Member(remote, 2, MemberState.ALIVE))));
+
+        assertEquals(remote, cluster.getMember(remote.id()));
+    }
+
+    @Test
+    void stalePingAboutLocalNodeIsRefuted() {
+        var service = new ClusterService(cluster, transport, List.of());
+
+        service.handle(ClusterMessages.ping(new Member(local, 1, MemberState.DEAD)));
+
+        assertEquals(2, cluster.getLocalMember().incarnation());
+        assertTrue(cluster.getLocalMember().isAlive());
+    }
+
+    @Test
     void startJoinsFirstReachableSeed() throws Exception {
         var joined = new Node("10.0.0.4:8083", "10.0.0.4", 8083);
-        transport.response = ClusterMessages.welcome("test-cluster", List.of(joined)).toByteArray();
+        transport.response = ClusterMessages.welcome("test-cluster", List.of(Member.of(joined))).toByteArray();
         transport.unreachable = Address.from("10.0.0.9:9999");
 
         var service = new ClusterService(cluster, transport,

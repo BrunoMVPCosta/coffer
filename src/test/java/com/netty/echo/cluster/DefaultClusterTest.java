@@ -59,14 +59,82 @@ class DefaultClusterTest {
     }
 
     @Test
-    void setMembersReplacesExistingOnesAndSkipsLocalNode() {
-        cluster.addMember(new Node("10.0.0.9:8099", "10.0.0.9", 8099));
+    void mergeKeepsExistingMembers() {
+        var existing = new Node("10.0.0.9:8099", "10.0.0.9", 8099);
+        cluster.addMember(existing);
 
         var other = new Node("10.0.0.3:8082", "10.0.0.3", 8082);
-        cluster.setMembers(List.of(remote, other, local));
+        cluster.merge(List.of(Member.of(remote), Member.of(other), Member.of(local)));
 
-        assertEquals(2, cluster.getMembers().size());
-        assertNull(cluster.getMember("10.0.0.9:8099"));
+        assertEquals(3, cluster.getMembers().size());
+        assertEquals(existing, cluster.getMember(existing.id()));
         assertEquals(other, cluster.getMember(other.id()));
+    }
+
+    @Test
+    void mergeIgnoresOlderIncarnation() {
+        cluster.merge(List.of(new Member(remote, 5, MemberState.ALIVE)));
+
+        cluster.merge(List.of(new Member(remote, 4, MemberState.DEAD)));
+
+        assertEquals(remote, cluster.getMember(remote.id()));
+    }
+
+    @Test
+    void mergeMarksMemberDeadAtSameIncarnation() {
+        cluster.merge(List.of(new Member(remote, 5, MemberState.ALIVE)));
+
+        cluster.merge(List.of(new Member(remote, 5, MemberState.DEAD)));
+
+        assertNull(cluster.getMember(remote.id()));
+        assertEquals(MemberState.DEAD, membership(remote).state());
+    }
+
+    @Test
+    void mergeHigherIncarnationResurrectsMember() {
+        cluster.merge(List.of(new Member(remote, 5, MemberState.DEAD)));
+
+        cluster.merge(List.of(new Member(remote, 6, MemberState.ALIVE)));
+
+        assertEquals(remote, cluster.getMember(remote.id()));
+    }
+
+    @Test
+    void mergeRefutesTombstoneAboutLocalNode() {
+        cluster.merge(List.of(new Member(local, 1, MemberState.DEAD)));
+
+        var localMember = cluster.getLocalMember();
+
+        assertEquals(2, localMember.incarnation());
+        assertTrue(localMember.isAlive());
+    }
+
+    @Test
+    void staleMembershipCannotResurrectDeadMember() {
+        cluster.merge(List.of(new Member(remote, 7, MemberState.ALIVE)));
+
+        cluster.removeMember(remote.id());
+
+        cluster.merge(List.of(new Member(remote, 7, MemberState.ALIVE)));
+
+        assertNull(cluster.getMember(remote.id()));
+        assertEquals(MemberState.DEAD, membership(remote).state());
+    }
+
+    @Test
+    void pruneDeadDropsTombstones() {
+        cluster.merge(List.of(new Member(remote, 7, MemberState.ALIVE)));
+        cluster.removeMember(remote.id());
+
+        cluster.pruneDead(-1);
+
+        assertNull(membership(remote));
+    }
+
+    private Member membership(Node node) {
+        return cluster.getMembership().stream()
+            .filter(member -> member.node().id().equals(node.id()))
+            .findFirst()
+            .orElse(null);
     }
 }

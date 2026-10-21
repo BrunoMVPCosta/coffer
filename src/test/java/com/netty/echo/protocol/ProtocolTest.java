@@ -8,6 +8,10 @@ import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 import com.google.protobuf.ByteString;
+import com.netty.echo.cluster.ClusterMessages;
+import com.netty.echo.cluster.Member;
+import com.netty.echo.cluster.MemberState;
+import com.netty.echo.cluster.Node;
 
 import org.junit.jupiter.api.Test;
 
@@ -22,6 +26,8 @@ class ProtocolTest {
             .setId("node-1")
             .setHost("127.0.0.1")
             .setPort(8080)
+            .setIncarnation(7)
+            .setState(ClusterProtocol.MemberState.MEMBER_STATE_ALIVE)
             .build();
 
         var message = ClusterProtocol.ClusterMessage.newBuilder()
@@ -38,6 +44,16 @@ class ProtocolTest {
         assertEquals("netty-cluster", parsed.getJoin().getClusterName());
         assertEquals("node-1", parsed.getJoin().getNode().getId());
         assertEquals(8080, parsed.getJoin().getNode().getPort());
+        assertEquals(7, parsed.getJoin().getNode().getIncarnation());
+    }
+
+    @Test
+    void memberRoundTripsIncarnationAndState() {
+        var member = new Member(new Node("node-2", "10.0.0.2", 8081), 42, MemberState.DEAD);
+
+        var parsed = ClusterMessages.memberFromProto(ClusterMessages.toProto(member));
+
+        assertEquals(member, parsed);
     }
 
     @Test

@@ -20,6 +20,7 @@ import com.netty.echo.transport.netty.NettyTransport;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
+import io.netty.channel.ChannelOption;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.channel.socket.nio.NioSocketChannel;
@@ -68,7 +69,10 @@ public class EchoClient {
         var localNode = new Node(localHost + ":" + localPort, localHost, localPort);
 
         var clusterName = System.getenv().getOrDefault("CLUSTER_NAME", "netty-cluster");
-        var cluster = new DefaultCluster(clusterName, localNode);
+
+        // Wall-clock based incarnations make a restarted node win over the
+        // tombstone left behind by its previous process.
+        var cluster = new DefaultCluster(clusterName, localNode, System.currentTimeMillis());
 
         var seeds = new ArrayList<Address>();
         for(int i = 1; i < args.length; i++) {
@@ -82,6 +86,9 @@ public class EchoClient {
         bootstrap
             .group(group)
             .channel(NioSocketChannel.class)
+            .option(ChannelOption.CONNECT_TIMEOUT_MILLIS, 3000)
+            .option(ChannelOption.TCP_NODELAY, true)
+            .option(ChannelOption.SO_KEEPALIVE, true)
             .handler(new EchoClientInitializer(futures));
 
         var serverGroup = new NioEventLoopGroup();

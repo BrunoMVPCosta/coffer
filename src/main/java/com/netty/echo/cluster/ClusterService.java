@@ -21,6 +21,7 @@ public class ClusterService implements ClusterMessageHandler {
 
     private static final Duration HEARTBEAT_INTERVAL = Duration.ofSeconds(2);
     private static final int MAX_MISSED_HEARTBEATS = 3;
+    private static final Duration TOMBSTONE_TTL = Duration.ofMinutes(5);
 
     private final Cluster cluster;
     private final Transport transport;
@@ -48,7 +49,8 @@ public class ClusterService implements ClusterMessageHandler {
     }
 
     public void leave() {
-        var message = ClusterMessages.leave(cluster.getMember().id()).toByteArray();
+        var local = cluster.getLocalMember();
+        var message = ClusterMessages.leave(local).toByteArray();
 
         for (var member : cluster.getMembers()) {
             transport.send(new Address(member.host(), member.port()), message, MessageKind.CLUSTER);
@@ -62,22 +64,35 @@ public class ClusterService implements ClusterMessageHandler {
         switch (message.getPayloadCase()) {
             case JOIN -> {
                 joined.set(true);
-                var node = ClusterMessages.fromProto(message.getJoin().getNode());
-                cluster.addMember(node);
-                System.out.println("[CLUSTER] - " + node.id() + " joined, members: " + memberIds());
+                var member = ClusterMessages.memberFromProto(message.getJoin().getNode());
+                cluster.merge(List.of(member));
+                System.out.println("[CLUSTER] - " + member.node().id() + " joined, members: " + memberIds());
                 broadcastMembers();
-                return ClusterMessages.welcome(cluster.getName(), allMembers());
+                return ClusterMessages.welcome(cluster.getName(), cluster.getMembership());
             }
             case PING -> {
-                return ClusterMessages.pong(cluster.getMember());
+                if (merge(message.getPing().getSender())) {
+                    broadcastMembers();
+                }
+                return ClusterMessages.pong(cluster.getLocalMember());
+            }
+            case PONG -> {
+                if (merge(message.getPong().getSender())) {
+                    broadcastMembers();
+                }
+                return null;
             }
             case MEMBERS -> {
-                updateMembers(message.getMembers().getMembersList());
+                if (merge(message.getMembers().getMembersList())) {
+                    broadcastMembers();
+                }
                 return null;
             }
             case LEAVE -> {
-                cluster.removeMember(message.getLeave().getNodeId());
-                System.out.println("[CLUSTER] - " + message.getLeave().getNodeId() + " left, members: " + memberIds());
+                var nodeId = message.getLeave().getNodeId();
+                cluster.removeMember(nodeId, message.getLeave().getIncarnation());
+                System.out.println("[CLUSTER] - " + nodeId + " left, members: " + memberIds());
+                broadcastMembers();
                 return null;
             }
             default -> {
@@ -87,7 +102,7 @@ public class ClusterService implements ClusterMessageHandler {
     }
 
     private void joinSeeds() {
-        var join = ClusterMessages.join(cluster.getName(), cluster.getMember());
+        var join = ClusterMessages.join(cluster.getName(), cluster.getLocalMember());
 
         for (var seed : seeds) {
             try {
@@ -96,7 +111,9 @@ public class ClusterService implements ClusterMessageHandler {
 
                 if (message.hasWelcome()) {
                     joined.set(true);
-                    updateMembers(message.getWelcome().getMembersList());
+                    if (merge(message.getWelcome().getMembersList())) {
+                        broadcastMembers();
+                    }
                     System.out.println("[CLUSTER] - Joined via " + address(seed) + ", members: " + memberIds());
                     return;
                 }
@@ -114,6 +131,9 @@ public class ClusterService implements ClusterMessageHandler {
         for (var member : cluster.getMembers()) {
             heartbeat(member);
         }
+
+        cluster.pruneDead(TOMBSTONE_TTL.toMillis());
+        broadcastMembers();
     }
 
     private void heartbeat(Node member) {
@@ -121,7 +141,7 @@ public class ClusterService implements ClusterMessageHandler {
             return;
         }
 
-        var ping = ClusterMessages.ping(cluster.getMember()).toByteArray();
+        var ping = ClusterMessages.ping(cluster.getLocalMember()).toByteArray();
 
         transport.sendAndReceive(new Address(member.host(), member.port()), ping, MessageKind.CLUSTER)
             .whenComplete((response, cause) -> {
@@ -141,6 +161,9 @@ public class ClusterService implements ClusterMessageHandler {
 
             if (message.hasPong()) {
                 missedHeartbeats.remove(member.id());
+                if (merge(message.getPong().getSender())) {
+                    broadcastMembers();
+                }
             }
         } catch (Exception ex) {
             heartbeatMissed(member);
@@ -161,26 +184,34 @@ public class ClusterService implements ClusterMessageHandler {
     }
 
     private void broadcastMembers() {
-        var message = ClusterMessages.members(cluster.getName(), allMembers()).toByteArray();
+        var message = ClusterMessages.members(cluster.getName(), cluster.getMembership()).toByteArray();
 
         for (var member : cluster.getMembers()) {
             transport.send(new Address(member.host(), member.port()), message, MessageKind.CLUSTER);
         }
     }
 
-    private void updateMembers(List<ClusterProtocol.Node> members) {
-        cluster.setMembers(members.stream().map(ClusterMessages::fromProto).toList());
+    private boolean merge(ClusterProtocol.Node sender) {
+        if (sender.getId().isEmpty()) {
+            return false;
+        }
+
+        return cluster.merge(List.of(ClusterMessages.memberFromProto(sender)));
     }
 
-    private List<Node> allMembers() {
-        var members = new ArrayList<Node>();
-        members.add(cluster.getMember());
-        members.addAll(cluster.getMembers());
-        return members;
+    private boolean merge(List<ClusterProtocol.Node> members) {
+        var observations = members.stream()
+            .map(ClusterMessages::memberFromProto)
+            .toList();
+
+        return cluster.merge(observations);
     }
 
     private List<String> memberIds() {
-        return allMembers().stream().map(Node::id).toList();
+        var ids = new ArrayList<String>();
+        ids.add(cluster.getMember().id());
+        cluster.getMembers().forEach(member -> ids.add(member.id()));
+        return ids;
     }
 
     private String address(Address address) {

@@ -19,12 +19,20 @@ import io.netty.channel.ChannelFutureListener;
 
 /**
  * NettyTransport
+ *
+ * <p>Keeps one pooled connection per address. A connection is reused while it
+ * is active; when it closes or a write fails, the next call opens a new one.
+ * Concurrent callers racing to the same address share a single in-flight
+ * connect attempt.</p>
  */
 public class NettyTransport implements Transport {
+
+    private static final long REQUEST_TIMEOUT_SECONDS = 3;
 
     private final Bootstrap bootstrap;
     private final ServerBootstrap serverBootstrap;
     private final ConcurrentMap<Address, Channel> connections = new ConcurrentHashMap<>();
+    private final ConcurrentMap<Address, CompletableFuture<Channel>> pendingConnections = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, CompletableFuture<byte[]>> futures;
 
     public NettyTransport(Bootstrap bootstrap, ServerBootstrap serverBootstrap, ConcurrentMap<UUID, CompletableFuture<byte[]>> futures) {
@@ -35,34 +43,23 @@ public class NettyTransport implements Transport {
 
     @Override
     public void send(Address address, byte[] payload, MessageKind kind) {
-        send(address, WireProtocol.Envelope.newBuilder()
+        var envelope = WireProtocol.Envelope.newBuilder()
             .setKind(toProtoKind(kind))
             .setPayload(ByteString.copyFrom(payload))
-            .build());
-    }
+            .build();
 
-    private void send(Address address, WireProtocol.Envelope envelope) {
-        var channel = connections.get(address);
-        if(channel == null) {
-            bootstrap.connect(address.host(), address.port()).addListener((ChannelFutureListener) future -> {
-                if(!future.isSuccess()) {
-                    System.out.println("Connection failed " + future.cause());
-                    return;
+        channel(address).whenComplete((channel, cause) -> {
+            if (cause != null) {
+                log(address, "connect failed", cause);
+                return;
+            }
+
+            channel.writeAndFlush(envelope).addListener((ChannelFutureListener) future -> {
+                if (!future.isSuccess()) {
+                    log(address, "send failed", future.cause());
                 }
-
-                var connectedChannel = future.channel();
-                connectedChannel.closeFuture().addListener((ChannelFutureListener) closeFuture -> {
-                    System.out.println("[CLIENT] - Connection closed");
-                    connections.values().remove(connectedChannel);
-                });
-                connections.putIfAbsent(address, connectedChannel);
-
-                connectedChannel.writeAndFlush(envelope);
             });
-
-        } else {
-            channel.writeAndFlush(envelope);
-        }
+        });
     }
 
     @Override
@@ -71,15 +68,84 @@ public class NettyTransport implements Transport {
         var future = new CompletableFuture<byte[]>();
         futures.put(messageId, future);
 
-        send(address, WireProtocol.Envelope.newBuilder()
+        var envelope = WireProtocol.Envelope.newBuilder()
             .setMessageId(messageId.toString())
             .setKind(toProtoKind(kind))
             .setPayload(ByteString.copyFrom(payload))
-            .build());
+            .build();
+
+        channel(address).whenComplete((channel, cause) -> {
+            if (cause != null) {
+                futures.remove(messageId);
+                future.completeExceptionally(cause);
+                return;
+            }
+
+            channel.writeAndFlush(envelope).addListener((ChannelFutureListener) write -> {
+                if (!write.isSuccess()) {
+                    futures.remove(messageId);
+                    future.completeExceptionally(write.cause());
+                }
+            });
+        });
 
         return future
-            .orTimeout(3, TimeUnit.SECONDS)
+            .orTimeout(REQUEST_TIMEOUT_SECONDS, TimeUnit.SECONDS)
             .whenComplete((response, cause) -> futures.remove(messageId));
+    }
+
+    /**
+     * Returns an active channel for the address, opening one if needed. All
+     * callers arriving during a connect share the same future.
+     */
+    private CompletableFuture<Channel> channel(Address address) {
+        var existing = connections.get(address);
+
+        if (existing != null && existing.isActive()) {
+            return CompletableFuture.completedFuture(existing);
+        }
+
+        if (existing != null) {
+            connections.remove(address, existing);
+        }
+
+        var pending = pendingConnections.get(address);
+        if (pending != null) {
+            return pending;
+        }
+
+        var created = new CompletableFuture<Channel>();
+        pending = pendingConnections.putIfAbsent(address, created);
+
+        if (pending != null) {
+            return pending;
+        }
+
+        connect(address, created);
+        return created;
+    }
+
+    private void connect(Address address, CompletableFuture<Channel> promise) {
+        bootstrap.connect(address.host(), address.port()).addListener((ChannelFutureListener) future -> {
+            if (!future.isSuccess()) {
+                pendingConnections.remove(address, promise);
+                promise.completeExceptionally(future.cause());
+                return;
+            }
+
+            var channel = future.channel();
+
+            channel.closeFuture().addListener((ChannelFutureListener) close ->
+                connections.remove(address, channel));
+
+            connections.put(address, channel);
+            pendingConnections.remove(address, promise);
+            promise.complete(channel);
+        });
+    }
+
+    private void log(Address address, String action, Throwable cause) {
+        System.out.println("[CLIENT] - " + action + " for " + address.host() + ":" + address.port() + ": " + cause);
     }
 
     private WireProtocol.Envelope.Kind toProtoKind(MessageKind kind) {

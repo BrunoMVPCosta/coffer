@@ -5,10 +5,18 @@ package nettyecho.cluster;
 option java_package = "com.netty.echo.protocol";
 option java_outer_classname = "ClusterProtocol";
 
+enum MemberState {
+  MEMBER_STATE_ALIVE = 0;
+  MEMBER_STATE_SUSPECT = 1;
+  MEMBER_STATE_DEAD = 2;
+}
+
 message Node {
   string id = 1;
   string host = 2;
   uint32 port = 3;
+  uint64 incarnation = 4;
+  MemberState state = 5;
 }
 
 message Join {
@@ -36,6 +44,7 @@ message Members {
 
 message Leave {
   string node_id = 1;
+  uint64 incarnation = 2;
 }
 
 message ClusterMessage {
