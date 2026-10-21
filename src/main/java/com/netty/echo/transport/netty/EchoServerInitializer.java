@@ -1,6 +1,7 @@
 package com.netty.echo.transport.netty;
 
 import com.netty.echo.cluster.ClusterMessageHandler;
+import com.netty.echo.kv.KvMessageHandler;
 import com.netty.echo.protocol.WireProtocol;
 import com.netty.echo.raft.RaftMessageHandler;
 
@@ -23,10 +24,16 @@ public class EchoServerInitializer extends ChannelInitializer<SocketChannel> {
 
     private final ClusterMessageHandler clusterMessageHandler;
     private final RaftMessageHandler raftMessageHandler;
+    private final KvMessageHandler kvMessageHandler;
 
-    public EchoServerInitializer(ClusterMessageHandler clusterMessageHandler, RaftMessageHandler raftMessageHandler) {
+    public EchoServerInitializer(
+        ClusterMessageHandler clusterMessageHandler,
+        RaftMessageHandler raftMessageHandler,
+        KvMessageHandler kvMessageHandler) {
+
         this.clusterMessageHandler = clusterMessageHandler;
         this.raftMessageHandler = raftMessageHandler;
+        this.kvMessageHandler = kvMessageHandler;
     }
 
     @Override
@@ -38,7 +45,8 @@ public class EchoServerInitializer extends ChannelInitializer<SocketChannel> {
         pipeline.addLast("protobufDecoder", new ProtobufDecoder(WireProtocol.Envelope.getDefaultInstance()));
         pipeline.addLast("protobufEncoder", new ProtobufEncoder());
 
-        pipeline.addLast("handler", new EchoServerHandler(clusterMessageHandler, raftMessageHandler));
+        pipeline.addLast("handler", new EchoServerHandler(
+            clusterMessageHandler, raftMessageHandler, kvMessageHandler));
 
         pipeline.addLast("logging", new LoggingHandler(LogLevel.DEBUG));
     }

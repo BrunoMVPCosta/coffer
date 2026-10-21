@@ -2,8 +2,8 @@ Not sure what is this yet.
 
 Future work:
  - Add integration tests to the transport layer
- - Build the key-value state machine on top of the Raft log
  - Add snapshots/compaction and linearizable reads (ReadIndex or leader lease)
+ - Implement Raft configuration changes instead of a static roster
 
 ## Discovery
 
@@ -79,6 +79,34 @@ Deleting a node's directory resets it.
 
 Elections are delayed by a short discovery grace period so a node has a chance
 to learn its peers before campaigning.
+
+## Key-value store
+
+`KvService` applies `Put` and `Delete` commands to an in-memory map in Raft log
+order. Commands travel as `KV` envelopes, and the state machine is rebuilt by
+replaying the persisted log after a restart.
+
+- writes must reach the leader; a follower forwards the command and returns the
+  leader's response
+- reads are served by the contacted node, so a follower read can be stale
+- a write is acknowledged only after the leader applies the committed entry
+
+The CLI can talk to any node:
+
+```
+docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 put foo bar
+docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 get foo
+docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 delete foo
+```
+
+Locally, with the cluster running from Maven:
+
+```
+mvn exec:java -Dexec.mainClass=com.netty.echo.KvClient -Dexec.args="127.0.0.1:8080 put foo bar"
+```
+
+Write to the leader, then read from each node to see replication. Read from a
+follower only after it has caught up if you need read-after-write consistency.
 
 ## How to run with Docker
 

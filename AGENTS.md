@@ -5,9 +5,10 @@ Instructions for agents working in this repository.
 ## What this project is
 
 A small distributed-systems playground written in Java 21 on top of Netty. It
-implements a custom TCP transport, cluster discovery with gossip membership, and
-Raft leader election and log replication. It is not a library; `EchoClient` is
-the runnable node and `docker compose` starts a three-node cluster.
+implements a custom TCP transport, cluster discovery with gossip membership,
+Raft leader election and log replication, and an in-memory key-value store
+replicated through the Raft log. It is not a library; `EchoClient` runs a node
+and `docker compose` starts a three-node cluster.
 
 ## Layout
 
@@ -18,9 +19,11 @@ the runnable node and `docker compose` starts a three-node cluster.
 - `src/main/java/com/netty/echo/cluster/` — seed discovery, join/leave,
   incarnation-based membership with tombstones.
 - `src/main/java/com/netty/echo/raft/` — `RaftService` (election, heartbeats,
-  log replication) and message helpers.
-- `src/main/java/com/netty/echo/EchoClient.java` — wires transport, cluster and
-  Raft together and is the process entry point.
+  log replication), storage, and message helpers.
+- `src/main/java/com/netty/echo/kv/` — key-value state machine and `KvService`.
+- `src/main/java/com/netty/echo/EchoClient.java` — wires transport, cluster,
+  Raft and KV together and is the process entry point.
+- `src/main/java/com/netty/echo/KvClient.java` — command-line KV client.
 - `src/test/java/` — mirrors the main package structure; JUnit Jupiter tests.
 
 ## Build and test
@@ -62,6 +65,8 @@ Stop it with `docker compose down`.
   the log, so do not introduce a second source of truth.
 - The leader appends a no-op entry when elected; state machines must ignore
   empty commands.
+- KV writes are leader-only and followers forward them. Reads are served from
+  the local replica and may be stale; do not describe them as linearizable.
 - `RaftService` state is guarded by `synchronized`; network callbacks may run on
   Netty threads. Keep state mutations inside the lock.
 - Prefer Java 21 features already in use (`record`, `var`, switch expressions)
@@ -73,6 +78,7 @@ Stop it with `docker compose down`.
 
 - `mvn test` passes (or the Docker equivalent above).
 - The Docker three-node demo still converges and elects a single leader.
+- A KV write is visible on all nodes and survives a cluster restart.
 - README is updated when behavior or commands change.
 - New protocol fields or messages have a round-trip or state-machine test.
 

@@ -13,7 +13,6 @@ import com.netty.echo.transport.MessageKind;
 import com.netty.echo.transport.Transport;
 
 import io.netty.bootstrap.Bootstrap;
-import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFutureListener;
 
@@ -30,14 +29,12 @@ public class NettyTransport implements Transport {
     private static final long REQUEST_TIMEOUT_SECONDS = 3;
 
     private final Bootstrap bootstrap;
-    private final ServerBootstrap serverBootstrap;
     private final ConcurrentMap<Address, Channel> connections = new ConcurrentHashMap<>();
     private final ConcurrentMap<Address, CompletableFuture<Channel>> pendingConnections = new ConcurrentHashMap<>();
     private final ConcurrentMap<UUID, CompletableFuture<byte[]>> futures;
 
-    public NettyTransport(Bootstrap bootstrap, ServerBootstrap serverBootstrap, ConcurrentMap<UUID, CompletableFuture<byte[]>> futures) {
+    public NettyTransport(Bootstrap bootstrap, ConcurrentMap<UUID, CompletableFuture<byte[]>> futures) {
         this.bootstrap = bootstrap;
-        this.serverBootstrap = serverBootstrap;
         this.futures = futures;
     }
 
@@ -152,6 +149,7 @@ public class NettyTransport implements Transport {
         return switch (kind) {
             case CLUSTER -> WireProtocol.Envelope.Kind.CLUSTER;
             case RAFT -> WireProtocol.Envelope.Kind.RAFT;
+            case KV -> WireProtocol.Envelope.Kind.KV;
             case APPLICATION -> WireProtocol.Envelope.Kind.APPLICATION;
         };
     }

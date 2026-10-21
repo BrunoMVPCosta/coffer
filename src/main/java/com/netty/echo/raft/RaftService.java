@@ -92,7 +92,7 @@ public class RaftService implements RaftMessageHandler {
             System::currentTimeMillis, new Random());
     }
 
-    RaftService(
+    public RaftService(
         Node self,
         Collection<Node> peers,
         Transport transport,
@@ -184,7 +184,7 @@ public class RaftService implements RaftMessageHandler {
      * Drives timeouts and leader heartbeats. Called by the scheduler in
      * production and directly by tests.
      */
-    synchronized void tick() {
+    public synchronized void tick() {
         var now = clock.getAsLong();
 
         if (role == Role.LEADER) {

@@ -11,6 +11,7 @@ message Envelope {
     APPLICATION = 1;
     CLUSTER = 2;
     RAFT = 3;
+    KV = 4;
   }
 
   string message_id = 1;

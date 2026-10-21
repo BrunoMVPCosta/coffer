@@ -1,0 +1,42 @@
+syntax = "proto3";
+
+package nettyecho.kv;
+
+option java_package = "com.netty.echo.protocol";
+option java_outer_classname = "KvProtocol";
+
+message Put {
+  string key = 1;
+  bytes value = 2;
+}
+
+message Get {
+  string key = 1;
+}
+
+message Delete {
+  string key = 1;
+}
+
+message KvCommand {
+  oneof command {
+    Put put = 1;
+    Get get = 2;
+    Delete delete = 3;
+  }
+}
+
+message KvResponse {
+  enum Status {
+    STATUS_OK = 0;
+    STATUS_NOT_FOUND = 1;
+    STATUS_NOT_LEADER = 2;
+    STATUS_ERROR = 3;
+  }
+
+  Status status = 1;
+  bytes value = 2;
+  string leader_id = 3;
+  string error = 4;
+  bool has_value = 5;
+}
