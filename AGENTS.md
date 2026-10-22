@@ -23,7 +23,8 @@ and `docker compose` starts a three-node cluster.
 - `src/main/java/com/netty/echo/kv/` — key-value state machine and `KvService`.
 - `src/main/java/com/netty/echo/EchoClient.java` — wires transport, cluster,
   Raft and KV together and is the process entry point.
-- `src/main/java/com/netty/echo/KvClient.java` — command-line KV client.
+- `src/main/java/com/netty/echo/KvClient.java` — interactive and one-shot KV
+  client.
 - `src/test/java/` — mirrors the main package structure; JUnit Jupiter tests.
 
 ## Build and test

@@ -91,18 +91,50 @@ replaying the persisted log after a restart.
 - reads are served by the contacted node, so a follower read can be stale
 - a write is acknowledged only after the leader applies the committed entry
 
-The CLI can talk to any node:
+The CLI works in two modes. With only an address it opens a shell and keeps one
+connection for the whole session:
+
+```
+docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081
+```
+
+```
+Connected to node2:8081
+Type 'help' for commands, 'quit' to exit.
+node2:8081> put foo bar
+OK
+node2:8081> get foo
+bar
+node2:8081> keys
+foo
+node2:8081> leader
+node1:8080
+node2:8081> info
+role: FOLLOWER
+term: 1
+leader: node1:8080
+keys: 1
+node2:8081> del foo
+OK
+node2:8081> quit
+```
+
+The shell understands `put`, `get`, `del`, `keys`, `leader`, `info`, `help`
+and `quit`. `keys` and `info` are answered by the contacted node, so they can
+lag behind the leader.
+
+For scripts, pass a command after the address:
 
 ```
 docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 put foo bar
 docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 get foo
-docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 delete foo
+docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 del foo
 ```
 
 Locally, with the cluster running from Maven:
 
 ```
-mvn exec:java -Dexec.mainClass=com.netty.echo.KvClient -Dexec.args="127.0.0.1:8080 put foo bar"
+mvn -q compile exec:java -Dexec.mainClass=com.netty.echo.KvClient -Dexec.args="127.0.0.1:8080"
 ```
 
 Write to the leader, then read from each node to see replication. Read from a

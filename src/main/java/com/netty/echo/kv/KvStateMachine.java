@@ -1,5 +1,6 @@
 package com.netty.echo.kv;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -44,5 +45,12 @@ public class KvStateMachine {
 
     public int size() {
         return values.size();
+    }
+
+    /**
+     * @return the keys on this replica, sorted; may lag behind the leader
+     */
+    public List<String> keys() {
+        return values.keySet().stream().sorted().toList();
     }
 }

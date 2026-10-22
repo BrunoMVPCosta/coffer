@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 import com.google.protobuf.ByteString;
 import com.netty.echo.protocol.KvProtocol;
@@ -33,6 +34,14 @@ class KvStateMachineTest {
         state.apply(KvProtocol.KvCommand.getDefaultInstance());
 
         assertEquals(0, state.size());
+    }
+
+    @Test
+    void listsKeysSorted() {
+        state.apply(put("b", "2"));
+        state.apply(put("a", "1"));
+
+        assertEquals(List.of("a", "b"), state.keys());
     }
 
     private static KvProtocol.KvCommand put(String key, String value) {

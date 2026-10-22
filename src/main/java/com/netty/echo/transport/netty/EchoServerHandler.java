@@ -32,16 +32,6 @@ public class EchoServerHandler extends SimpleChannelInboundHandler<WireProtocol.
     }
 
     @Override
-    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-        System.out.println("[SERVER] - " + ctx.channel().remoteAddress() + " has joined!\n");
-    }
-
-    @Override
-    public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
-        System.out.println("[SERVER] - " + ctx.channel().remoteAddress() + " has left!\n");
-    }
-
-    @Override
     public void channelRead0(ChannelHandlerContext ctx, WireProtocol.Envelope envelope) throws Exception {
         if (envelope.getKind() == WireProtocol.Envelope.Kind.CLUSTER) {
             handleClusterMessage(ctx, envelope);

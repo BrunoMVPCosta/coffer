@@ -87,6 +87,21 @@ class KvServiceTest {
     }
 
     @Test
+    void infoReportsRoleTermLeaderAndKeys() throws Exception {
+        startSingleNodeLeader();
+        call(put("b", "2"));
+        call(put("a", "1"));
+
+        var info = call(info());
+
+        assertEquals(KvProtocol.KvResponse.Status.STATUS_OK, info.getStatus());
+        assertEquals("LEADER", info.getRole());
+        assertEquals(1, info.getTerm());
+        assertEquals(LOCAL.id(), info.getLeaderId());
+        assertEquals(List.of("a", "b"), info.getKeysList());
+    }
+
+    @Test
     void restartReplaysCommittedLogIntoStateMachine() throws Exception {
         startSingleNodeLeader();
         call(put("a", "1"));
@@ -140,6 +155,12 @@ class KvServiceTest {
     private static KvProtocol.KvCommand delete(String key) {
         return KvProtocol.KvCommand.newBuilder()
             .setDelete(KvProtocol.Delete.newBuilder().setKey(key))
+            .build();
+    }
+
+    private static KvProtocol.KvCommand info() {
+        return KvProtocol.KvCommand.newBuilder()
+            .setInfo(KvProtocol.Info.getDefaultInstance())
             .build();
     }
 

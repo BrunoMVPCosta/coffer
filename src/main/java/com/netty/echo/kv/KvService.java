@@ -50,9 +50,20 @@ public class KvService implements KvMessageHandler {
     public CompletableFuture<KvProtocol.KvResponse> handle(KvProtocol.KvCommand command) {
         return switch (command.getCommandCase()) {
             case GET -> CompletableFuture.completedFuture(read(command.getGet()));
+            case INFO -> CompletableFuture.completedFuture(info());
             case PUT, DELETE -> write(command);
             default -> CompletableFuture.completedFuture(error("empty command"));
         };
+    }
+
+    private KvProtocol.KvResponse info() {
+        return KvProtocol.KvResponse.newBuilder()
+            .setStatus(KvProtocol.KvResponse.Status.STATUS_OK)
+            .setRole(raft.role().name())
+            .setTerm(raft.currentTerm())
+            .setLeaderId(raft.leaderId() == null ? "" : raft.leaderId())
+            .addAllKeys(state.keys())
+            .build();
     }
 
     private KvProtocol.KvResponse read(KvProtocol.Get get) {
