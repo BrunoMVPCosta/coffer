@@ -127,6 +127,7 @@ class KvServiceTest {
         clock.set(10_000);
         raft.tick();
         call(put("a", "1"));
+        awaitSnapshot(2);
 
         assertEquals(2, storage.loadSnapshot().getLastIncludedIndex());
         assertEquals(0, raft.logSize());
@@ -160,6 +161,16 @@ class KvServiceTest {
 
     private KvProtocol.KvResponse call(KvProtocol.KvCommand command) throws Exception {
         return kv.handle(command).get(1, TimeUnit.SECONDS);
+    }
+
+    private void awaitSnapshot(long index) throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+
+        while (raft.snapshotIndex() < index && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+
+        assertEquals(index, raft.snapshotIndex());
     }
 
     private static KvProtocol.KvCommand put(String key, String value) {

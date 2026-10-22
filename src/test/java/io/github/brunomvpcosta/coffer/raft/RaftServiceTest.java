@@ -11,6 +11,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.github.brunomvpcosta.coffer.cluster.Node;
@@ -176,7 +178,7 @@ class RaftServiceTest {
     }
 
     @Test
-    void snapshotsAndCompactsAppliedLog() {
+    void snapshotsAndCompactsAppliedLog() throws Exception {
         raft = newRaft(2);
         raft.setStateMachine(new RecordingStateMachine());
         afterDiscovery();
@@ -186,6 +188,7 @@ class RaftServiceTest {
         assertEquals(0, raft.snapshotIndex());
 
         raft.append(bytes("a"));
+        awaitSnapshot(raft, 2);
 
         assertEquals(2, raft.snapshotIndex());
         assertEquals(2, storage.loadSnapshot().getLastIncludedIndex());
@@ -194,12 +197,13 @@ class RaftServiceTest {
     }
 
     @Test
-    void snapshotSurvivesRestart() {
+    void snapshotSurvivesRestart() throws Exception {
         raft = newRaft(2);
         raft.setStateMachine(new RecordingStateMachine());
         afterDiscovery();
         raft.tick();
         raft.append(bytes("a"));
+        awaitSnapshot(raft, 2);
 
         assertEquals(0, raft.logSize());
         assertEquals(2, raft.snapshotIndex());
@@ -210,6 +214,26 @@ class RaftServiceTest {
         assertEquals(2, raft.lastIndex());
         assertEquals(0, raft.logSize());
         assertEquals(2, raft.commitIndex());
+    }
+
+    @Test
+    void snapshotWriteDoesNotBlockApply() throws Exception {
+        var blocking = new BlockingStorage();
+        raft = new RaftService(LOCAL, List.of(), transport, blocking, 2,
+            50, 100, 200, clock::get, new Random(7));
+        raft.setStateMachine(new RecordingStateMachine());
+        afterDiscovery();
+        raft.tick();
+
+        raft.append(bytes("a"));
+
+        assertTrue(blocking.entered.await(2, TimeUnit.SECONDS));
+        assertEquals(2, raft.lastIndex());
+        assertEquals(2, raft.commitIndex());
+        assertEquals(0, raft.snapshotIndex());
+
+        blocking.release.countDown();
+        awaitSnapshot(raft, 2);
     }
 
     @Test
@@ -299,6 +323,16 @@ class RaftServiceTest {
         clock.set(10_000);
     }
 
+    private static void awaitSnapshot(RaftService raft, long index) throws InterruptedException {
+        var deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(2);
+
+        while (raft.snapshotIndex() < index && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+
+        assertEquals(index, raft.snapshotIndex());
+    }
+
     private static byte[] bytes(String value) {
         return value.getBytes(StandardCharsets.UTF_8);
     }
@@ -319,6 +353,45 @@ class RaftServiceTest {
         @Override
         public void restore(byte[] snapshot) {
             this.restored = snapshot;
+        }
+    }
+
+    static final class BlockingStorage implements RaftStorage {
+
+        private final InMemoryRaftStorage delegate = new InMemoryRaftStorage();
+        final CountDownLatch entered = new CountDownLatch(1);
+        final CountDownLatch release = new CountDownLatch(1);
+        private boolean block = true;
+
+        @Override
+        public RaftProtocol.PersistentState load() {
+            return delegate.load();
+        }
+
+        @Override
+        public void save(RaftProtocol.PersistentState state) {
+            delegate.save(state);
+        }
+
+        @Override
+        public RaftProtocol.Snapshot loadSnapshot() {
+            return delegate.loadSnapshot();
+        }
+
+        @Override
+        public void saveSnapshot(RaftProtocol.Snapshot snapshot) {
+            if (block) {
+                block = false;
+                entered.countDown();
+
+                try {
+                    release.await(5, TimeUnit.SECONDS);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+
+            delegate.saveSnapshot(snapshot);
         }
     }
 

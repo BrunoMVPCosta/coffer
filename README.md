@@ -88,9 +88,12 @@ atomically (write to a temporary file, force it, then rename).
 The state machine is snapshotted every `RAFT_SNAPSHOT_THRESHOLD` applied entries
 (default 1024; `0` disables snapshots). A snapshot records the last included
 index and term plus the serialized state in `raft-snapshot.bin`, and the log is
-truncated before the snapshot index. A restart restores the snapshot and replays
-only the entries after it, so the log stays bounded instead of growing forever.
-A lagging follower catches up through `InstallSnapshot`.
+truncated before the snapshot index once the snapshot is durable. Serialization
+happens under the Raft lock, but the write and fsync run on a dedicated
+`raft-snapshot` thread, so the apply loop does not block on disk. A restart
+restores the snapshot and replays only the entries after it, so the log stays
+bounded instead of growing forever. A lagging follower catches up through
+`InstallSnapshot`.
 
 The data directory comes from `RAFT_DATA_DIR` (default `data/`) and gets one
 subdirectory per node id. Docker Compose mounts a named volume per node at

@@ -68,8 +68,10 @@ Stop it with `docker compose down`.
   what keep it bounded.
 - State machines implement `RaftStateMachine` and must support `snapshot()` and
   `restore(byte[])`. A snapshot is taken every `RAFT_SNAPSHOT_THRESHOLD` applied
-  entries (`0` disables it) and the log is truncated before the snapshot index.
-  `InstallSnapshot` catches up lagging peers.
+  entries (`0` disables it) and the log is truncated before the snapshot index
+  once the snapshot is durable. Serialization is under the Raft lock; the write
+  and fsync run on a dedicated `raft-snapshot` thread. `InstallSnapshot` catches
+  up lagging peers.
 - Never introduce a second source of truth for replicated state: the Raft log
   and snapshots are the only durability path.
 - The leader appends a no-op entry when elected; state machines must ignore

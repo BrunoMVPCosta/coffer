@@ -10,7 +10,9 @@ import java.util.Objects;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
@@ -63,6 +65,11 @@ public class RaftService implements RaftMessageHandler {
         thread.setDaemon(true);
         return thread;
     });
+    private final ExecutorService snapshotWriter = Executors.newSingleThreadExecutor(task -> {
+        var thread = new Thread(task, "raft-snapshot");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private final List<RaftProtocol.LogEntry> log = new ArrayList<>();
     private final Map<String, Long> nextIndex = new HashMap<>();
@@ -82,6 +89,7 @@ public class RaftService implements RaftMessageHandler {
     private long logBaseIndex;
     private long logBaseTerm;
     private long lastSnapshotIndex;
+    private boolean snapshotInProgress;
     private RaftProtocol.Snapshot snapshot = RaftProtocol.Snapshot.getDefaultInstance();
     private RaftStateMachine stateMachine = new RaftStateMachine() {
         @Override
@@ -204,6 +212,7 @@ public class RaftService implements RaftMessageHandler {
 
     public void stop() {
         scheduler.shutdownNow();
+        snapshotWriter.shutdownNow();
     }
 
     /**
@@ -688,7 +697,8 @@ public class RaftService implements RaftMessageHandler {
     }
 
     private void maybeSnapshot() {
-        if (snapshotThreshold <= 0 || lastApplied - lastSnapshotIndex < snapshotThreshold) {
+        if (snapshotThreshold <= 0 || snapshotInProgress
+            || lastApplied - lastSnapshotIndex < snapshotThreshold) {
             return;
         }
 
@@ -699,20 +709,47 @@ public class RaftService implements RaftMessageHandler {
         }
 
         var index = lastApplied;
-        var term = termAt(index);
         var next = RaftProtocol.Snapshot.newBuilder()
             .setLastIncludedIndex(index)
-            .setLastIncludedTerm(term)
+            .setLastIncludedTerm(termAt(index))
             .setData(com.google.protobuf.ByteString.copyFrom(data))
             .build();
 
-        storage.saveSnapshot(next);
-        snapshot = next;
-        compactTo(index, term);
-        lastSnapshotIndex = index;
+        snapshotInProgress = true;
+
+        try {
+            snapshotWriter.execute(() -> writeSnapshot(next));
+        } catch (RejectedExecutionException ex) {
+            snapshotInProgress = false;
+            log("snapshot rejected: " + ex.getMessage());
+        }
+    }
+
+    private void writeSnapshot(RaftProtocol.Snapshot next) {
+        try {
+            storage.saveSnapshot(next);
+        } catch (RuntimeException ex) {
+            log("snapshot write failed: " + ex);
+            snapshotWriteFinished(null);
+            return;
+        }
+
+        snapshotWriteFinished(next);
+    }
+
+    private synchronized void snapshotWriteFinished(RaftProtocol.Snapshot saved) {
+        snapshotInProgress = false;
+
+        if (saved == null || saved.getLastIncludedIndex() <= logBaseIndex) {
+            return;
+        }
+
+        snapshot = saved;
+        compactTo(saved.getLastIncludedIndex(), saved.getLastIncludedTerm());
+        lastSnapshotIndex = saved.getLastIncludedIndex();
         persist();
 
-        log("snapshot at index " + index + ", log entries: " + log.size());
+        log("snapshot at index " + saved.getLastIncludedIndex() + ", log entries: " + log.size());
     }
 
     private void compactTo(long index, long term) {
