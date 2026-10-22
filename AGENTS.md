@@ -62,10 +62,10 @@ Stop it with `docker compose down`.
   (`DEAD` over `SUSPECT` over `ALIVE`). Dead nodes stay as tombstones.
 - The transport pools one connection per address. Use `sendAndReceive` for RPC
   and `send` for fire-and-forget messages.
-- Raft term, vote and log are persisted through `RaftStorage`.
-  `FileRaftStorage` writes `raft-state.bin` and `raft-snapshot.bin` atomically.
-  There is no write-ahead log; the whole log is rewritten, so snapshots are
-  what keep it bounded.
+- Raft term and vote are persisted in `raft-meta.bin`. Log entries are appended
+  to `raft-log.bin` and the file is rewritten only on truncation or compaction,
+  so a normal append does not rewrite the whole log. Snapshots live in
+  `raft-snapshot.bin`; all rewrites are atomic.
 - State machines implement `RaftStateMachine` and must support `snapshot()` and
   `restore(byte[])`. A snapshot is taken every `RAFT_SNAPSHOT_THRESHOLD` applied
   entries (`0` disables it) and the log is truncated before the snapshot index

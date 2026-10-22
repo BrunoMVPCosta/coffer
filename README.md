@@ -81,9 +81,11 @@ same transport:
 
 ### Persistence
 
-The term, vote and compacted log are written to disk through `RaftStorage`.
-`FileRaftStorage` keeps them in `raft-state.bin` and replaces the file
-atomically (write to a temporary file, force it, then rename).
+The term and vote live in `raft-meta.bin`. Log entries are appended to
+`raft-log.bin` as length-prefixed records, so a normal append does not rewrite
+the log; the file is rewritten only when entries are truncated or compacted
+away. Snapshots live in `raft-snapshot.bin`, and every rewritten file is
+replaced atomically (write to a temporary file, force it, then rename).
 
 The state machine is snapshotted every `RAFT_SNAPSHOT_THRESHOLD` applied entries
 (default 1024; `0` disables snapshots). A snapshot records the last included
