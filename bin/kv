@@ -1,0 +1,13 @@
+#!/usr/bin/env sh
+# Run the Coffer KV client inside the node1 container.
+set -e
+
+cd "$(dirname "$0")/.."
+
+if [ -t 0 ]; then
+  exec docker compose exec node1 java -cp "coffer.jar:lib/*" \
+    io.github.brunomvpcosta.coffer.KvClient "$@"
+else
+  exec docker compose exec -T node1 java -cp "coffer.jar:lib/*" \
+    io.github.brunomvpcosta.coffer.KvClient "$@"
+fi

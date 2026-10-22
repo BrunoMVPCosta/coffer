@@ -146,6 +146,13 @@ The shell understands `put`, `get`, `del`, `keys`, `leader`, `info`, `help`
 and `quit`. `keys` and `info` are answered by the contacted node, so they can
 lag behind the leader.
 
+A small wrapper is included so you can skip the classpath:
+
+```
+./bin/kv node2:8081 get foo
+./bin/kv node2:8081 put foo bar
+```
+
 For scripts, pass a command after the address:
 
 ```
