@@ -10,7 +10,7 @@ FROM eclipse-temurin:21-jre
 
 WORKDIR /app
 
-COPY --from=build /app/target/netty-echo-1.0-SNAPSHOT.jar ./netty-echo.jar
+COPY --from=build /app/target/coffer-1.0-SNAPSHOT.jar ./coffer.jar
 COPY --from=build /app/target/dependency ./lib
 
-ENTRYPOINT ["java", "-cp", "netty-echo.jar:lib/*", "com.netty.echo.EchoClient"]
+ENTRYPOINT ["java", "-cp", "coffer.jar:lib/*", "io.github.brunomvpcosta.coffer.ClusterNode"]

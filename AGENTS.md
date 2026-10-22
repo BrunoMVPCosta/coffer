@@ -4,27 +4,29 @@ Instructions for agents working in this repository.
 
 ## What this project is
 
-A small distributed-systems playground written in Java 21 on top of Netty. It
-implements a custom TCP transport, cluster discovery with gossip membership,
-Raft leader election and log replication, and an in-memory key-value store
-replicated through the Raft log. It is not a library; `EchoClient` runs a node
-and `docker compose` starts a three-node cluster.
+Coffer is a small distributed-systems playground written in Java 21 on top of
+Netty. It implements a custom TCP transport, cluster discovery with gossip
+membership, Raft leader election and log replication, and an in-memory
+key-value store replicated through the Raft log. It is not a library;
+`ClusterNode` runs a node and `docker compose` starts a three-node cluster.
 
 ## Layout
 
-- `src/main/protobuf/` — wire, cluster and Raft schemas. Generated Java lands in
-  `com.netty.echo.protocol` under `target/generated-sources`; never edit it.
-- `src/main/java/com/netty/echo/transport/` — `Transport` abstraction and
-  `MessageKind`. The Netty implementation is in `transport/netty/`.
-- `src/main/java/com/netty/echo/cluster/` — seed discovery, join/leave,
-  incarnation-based membership with tombstones.
-- `src/main/java/com/netty/echo/raft/` — `RaftService` (election, heartbeats,
-  log replication), storage, and message helpers.
-- `src/main/java/com/netty/echo/kv/` — key-value state machine and `KvService`.
-- `src/main/java/com/netty/echo/EchoClient.java` — wires transport, cluster,
-  Raft and KV together and is the process entry point.
-- `src/main/java/com/netty/echo/KvClient.java` — interactive and one-shot KV
-  client.
+- `src/main/protobuf/` — wire, cluster and Raft schemas. Generated Java lands
+  in `io.github.brunomvpcosta.coffer.protocol`; never edit generated sources.
+- `src/main/java/io/github/brunomvpcosta/coffer/transport/` — `Transport`
+  abstraction and `MessageKind`; the Netty implementation is in
+  `transport/netty/`.
+- `src/main/java/io/github/brunomvpcosta/coffer/cluster/` — seed discovery,
+  join/leave, incarnation-based membership with tombstones.
+- `src/main/java/io/github/brunomvpcosta/coffer/raft/` — `RaftService`
+  (election, heartbeats, log replication), storage, and message helpers.
+- `src/main/java/io/github/brunomvpcosta/coffer/kv/` — key-value state machine
+  and `KvService`.
+- `src/main/java/io/github/brunomvpcosta/coffer/ClusterNode.java` — wires
+  transport, cluster, Raft and KV together and is the process entry point.
+- `src/main/java/io/github/brunomvpcosta/coffer/KvClient.java` — interactive and
+  one-shot KV client.
 - `src/test/java/` — mirrors the main package structure; JUnit Jupiter tests.
 
 ## Build and test
@@ -37,7 +39,7 @@ mvn -q -DskipTests package
 If Maven is not installed, use the same Maven image the Dockerfile uses:
 
 ```sh
-docker run --rm -v "$PWD":/app -w /app -v netty-echo-m2:/root/.m2 \
+docker run --rm -v "$PWD":/app -w /app -v coffer-m2:/root/.m2 \
   maven:3.9-eclipse-temurin-21 mvn -q -B test
 ```
 

@@ -7,9 +7,9 @@
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopOnEntry": false,
-            "mainClass": "com.netty.echo.EchoClient",
+            "mainClass": "io.github.brunomvpcosta.coffer.ClusterNode",
             "args": "8080 127.0.0.1:8081 127.0.0.1:8082",
-            "projectName": "netty-echo"
+            "projectName": "coffer"
         },
         {
             "type": "java",
@@ -18,9 +18,9 @@
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopOnEntry": false,
-            "mainClass": "com.netty.echo.EchoClient",
+            "mainClass": "io.github.brunomvpcosta.coffer.ClusterNode",
             "args": "8081 127.0.0.1:8080 127.0.0.1:8082",
-            "projectName": "netty-echo"
+            "projectName": "coffer"
         },
         {
             "type": "java",
@@ -29,9 +29,9 @@
             "cwd": "${workspaceFolder}",
             "console": "internalConsole",
             "stopOnEntry": false,
-            "mainClass": "com.netty.echo.EchoClient",
+            "mainClass": "io.github.brunomvpcosta.coffer.ClusterNode",
             "args": "8082 127.0.0.1:8080 127.0.0.1:8081",
-            "projectName": "netty-echo"
+            "projectName": "coffer"
         }
     ]
 }

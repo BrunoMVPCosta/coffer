@@ -1,8 +1,8 @@
 syntax = "proto3";
 
-package nettyecho.raft;
+package coffer.raft;
 
-option java_package = "com.netty.echo.protocol";
+option java_package = "io.github.brunomvpcosta.coffer.protocol";
 option java_outer_classname = "RaftProtocol";
 
 message LogEntry {

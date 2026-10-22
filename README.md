@@ -1,9 +1,10 @@
-Not sure what is this yet.
+<p align="center">
+  <img src="docs/logo.svg" alt="Coffer" width="640">
+</p>
 
-Future work:
- - Add integration tests to the transport layer
- - Add snapshots/compaction and linearizable reads (ReadIndex or leader lease)
- - Implement Raft configuration changes instead of a static roster
+Coffer is a small distributed key-value store built in Java 21 on a custom
+Netty transport, gossip membership, and Raft consensus. Writes are replicated
+through a Raft log; reads are served by the node you contact.
 
 ## Discovery
 
@@ -14,7 +15,7 @@ Nodes start with a list of seed addresses and discover the rest of the cluster a
 - every node pings its peers every 2 seconds and removes a peer after 3 missed heartbeats
 - a node that shuts down cleanly broadcasts `LEAVE`
 
-Each node advertises itself as `host:port`, where the host comes from the `NODE_HOST` environment variable (or the local address when unset) and the cluster name from `CLUSTER_NAME` (default `netty-cluster`).
+Each node advertises itself as `host:port`, where the host comes from the `NODE_HOST` environment variable (or the local address when unset) and the cluster name from `CLUSTER_NAME` (default `coffer-cluster`).
 
 ## Membership
 
@@ -95,7 +96,7 @@ The CLI works in two modes. With only an address it opens a shell and keeps one
 connection for the whole session:
 
 ```
-docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081
+docker compose exec node1 java -cp "coffer.jar:lib/*" io.github.brunomvpcosta.coffer.KvClient node2:8081
 ```
 
 ```
@@ -126,15 +127,15 @@ lag behind the leader.
 For scripts, pass a command after the address:
 
 ```
-docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 put foo bar
-docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 get foo
-docker compose exec node1 java -cp "netty-echo.jar:lib/*" com.netty.echo.KvClient node2:8081 del foo
+docker compose exec node1 java -cp "coffer.jar:lib/*" io.github.brunomvpcosta.coffer.KvClient node2:8081 put foo bar
+docker compose exec node1 java -cp "coffer.jar:lib/*" io.github.brunomvpcosta.coffer.KvClient node2:8081 get foo
+docker compose exec node1 java -cp "coffer.jar:lib/*" io.github.brunomvpcosta.coffer.KvClient node2:8081 del foo
 ```
 
 Locally, with the cluster running from Maven:
 
 ```
-mvn -q compile exec:java -Dexec.mainClass=com.netty.echo.KvClient -Dexec.args="127.0.0.1:8080"
+mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvpcosta.coffer.KvClient -Dexec.args="127.0.0.1:8080"
 ```
 
 Write to the leader, then read from each node to see replication. Read from a
@@ -152,16 +153,24 @@ Logs from all nodes are prefixed with the node name; `Ctrl+C` or `docker compose
 
 ## How to run locally
 
-Requires JDK 21+ and Maven.
+Requires JDK 21+ and Maven. Set `NODE_HOST=127.0.0.1` so each node's advertised
+id matches the seed addresses; without it, followers cannot resolve the leader
+for forwarded writes.
 
 ```
-mvn exec:java -Dexec.mainClass=com.netty.echo.EchoClient -Dexec.args="8080 127.0.0.1:8081 127.0.0.1:8082"
+NODE_HOST=127.0.0.1 mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvpcosta.coffer.ClusterNode -Dexec.args="8080 127.0.0.1:8081 127.0.0.1:8082"
 ```
 
 ```
-mvn exec:java -Dexec.mainClass=com.netty.echo.EchoClient -Dexec.args="8081 127.0.0.1:8080 127.0.0.1:8082"
+NODE_HOST=127.0.0.1 mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvpcosta.coffer.ClusterNode -Dexec.args="8081 127.0.0.1:8080 127.0.0.1:8082"
 ```
 
 ```
-mvn exec:java -Dexec.mainClass=com.netty.echo.EchoClient -Dexec.args="8082 127.0.0.1:8080 127.0.0.1:8081"
+NODE_HOST=127.0.0.1 mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvpcosta.coffer.ClusterNode -Dexec.args="8082 127.0.0.1:8080 127.0.0.1:8081"
 ```
+
+## Future work
+
+- Add integration tests to the transport layer
+- Add snapshots/compaction and linearizable reads (ReadIndex or leader lease)
+- Implement Raft configuration changes instead of a static roster

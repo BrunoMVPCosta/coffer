@@ -1,0 +1,94 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 720 240" role="img" aria-labelledby="title desc">
+  <title id="title">Coffer</title>
+  <desc id="desc">Coffer — a Raft-backed key-value cluster</desc>
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0B1220"/>
+      <stop offset="1" stop-color="#101A2E"/>
+    </linearGradient>
+    <radialGradient id="rightGlow" cx="72%" cy="50%" r="60%">
+      <stop offset="0" stop-color="#5EEAD4" stop-opacity="0.10"/>
+      <stop offset="1" stop-color="#5EEAD4" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="markBg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0D1728"/>
+      <stop offset="1" stop-color="#14213A"/>
+    </linearGradient>
+    <linearGradient id="gold" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#FFD98A"/>
+      <stop offset="1" stop-color="#F0A93B"/>
+    </linearGradient>
+    <linearGradient id="goldDark" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#E9A23B"/>
+      <stop offset="1" stop-color="#C77E22"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="50%" cy="45%" r="55%">
+      <stop offset="0" stop-color="#5EEAD4" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="#5EEAD4" stop-opacity="0"/>
+    </radialGradient>
+
+    <symbol id="mark" viewBox="0 0 256 256">
+      <rect width="256" height="256" rx="48" fill="url(#markBg)"/>
+      <circle cx="128" cy="112" r="100" fill="url(#glow)"/>
+      <g stroke="#5EEAD4" stroke-width="3" stroke-linecap="round" opacity="0.85">
+        <path d="M76 64 L128 42 L180 64"/>
+        <path d="M76 64 L128 88"/>
+        <path d="M180 64 L128 88"/>
+      </g>
+      <g fill="#5EEAD4">
+        <circle cx="76" cy="64" r="7"/>
+        <circle cx="128" cy="42" r="7"/>
+        <circle cx="180" cy="64" r="7"/>
+        <circle cx="128" cy="88" r="4.5"/>
+      </g>
+      <ellipse cx="128" cy="212" rx="66" ry="9" fill="#020617" opacity="0.55"/>
+      <g>
+        <rect x="62" y="116" width="132" height="82" rx="12" fill="url(#goldDark)"/>
+        <rect x="54" y="98" width="148" height="32" rx="9" fill="url(#gold)"/>
+        <rect x="68" y="106" width="120" height="5" rx="2.5" fill="#0B1220" opacity="0.16"/>
+        <g fill="#0B1220" opacity="0.16">
+          <rect x="72" y="144" width="112" height="4" rx="2"/>
+          <rect x="72" y="164" width="112" height="4" rx="2"/>
+          <rect x="72" y="184" width="112" height="4" rx="2"/>
+        </g>
+        <rect x="112" y="124" width="32" height="44" rx="6" fill="#0B1220" opacity="0.88"/>
+        <circle cx="128" cy="139" r="5.5" fill="#FFD98A"/>
+        <path d="M125 143 L131 143 L129 153 L127 153 Z" fill="#FFD98A"/>
+        <path d="M56 148 q-12 0 -12 12 q0 12 12 12" fill="none" stroke="#FFD98A" stroke-width="6" stroke-linecap="round"/>
+        <path d="M200 148 q12 0 12 12 q0 12 -12 12" fill="none" stroke="#FFD98A" stroke-width="6" stroke-linecap="round"/>
+        <rect x="72" y="198" width="18" height="10" rx="4" fill="#B8731F"/>
+        <rect x="166" y="198" width="18" height="10" rx="4" fill="#B8731F"/>
+      </g>
+      <rect x="1.5" y="1.5" width="253" height="253" rx="46.5" fill="none" stroke="#1E293B" stroke-width="3"/>
+    </symbol>
+  </defs>
+
+  <rect width="720" height="240" fill="url(#bg)"/>
+  <rect width="720" height="240" fill="url(#rightGlow)"/>
+
+  <!-- faint log / quorum motif -->
+  <g stroke="#1E293B" stroke-width="2" stroke-linecap="round" opacity="0.9">
+    <path d="M612 78 H682"/>
+    <path d="M612 100 H666"/>
+    <path d="M612 122 H646"/>
+    <path d="M612 144 H628"/>
+  </g>
+  <g fill="#5EEAD4">
+    <circle cx="612" cy="78" r="3" opacity="0.7"/>
+    <circle cx="612" cy="100" r="3" opacity="0.5"/>
+    <circle cx="612" cy="122" r="3" opacity="0.35"/>
+    <circle cx="612" cy="144" r="3" opacity="0.22"/>
+  </g>
+
+  <use href="#mark" x="40" y="40" width="160" height="160"/>
+
+  <text x="236" y="116" fill="#F8FAFC"
+        font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="68" font-weight="700" letter-spacing="12">COFFER</text>
+  <text x="240" y="154" fill="#94A3B8"
+        font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="21">Raft-backed key-value cluster</text>
+  <text x="240" y="186" fill="#5EEAD4"
+        font-family="Inter, 'Segoe UI', Helvetica, Arial, sans-serif"
+        font-size="13" font-weight="600" letter-spacing="3">CONSENSUS · REPLICATION · STORAGE</text>
+</svg>

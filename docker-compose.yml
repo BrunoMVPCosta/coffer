@@ -1,11 +1,13 @@
+name: coffer
+
 services:
   node1:
-    image: netty-echo:latest
+    image: coffer:latest
     build: .
     command: ["8080", "node2:8081", "node3:8082"]
     environment:
       NODE_HOST: node1
-      CLUSTER_NAME: netty-cluster
+      CLUSTER_NAME: coffer-cluster
       RAFT_DATA_DIR: /data
     volumes:
       - node1-data:/data
@@ -13,11 +15,11 @@ services:
       - "8080:8080"
 
   node2:
-    image: netty-echo:latest
+    image: coffer:latest
     command: ["8081", "node1:8080", "node3:8082"]
     environment:
       NODE_HOST: node2
-      CLUSTER_NAME: netty-cluster
+      CLUSTER_NAME: coffer-cluster
       RAFT_DATA_DIR: /data
     volumes:
       - node2-data:/data
@@ -25,11 +27,11 @@ services:
       - "8081:8081"
 
   node3:
-    image: netty-echo:latest
+    image: coffer:latest
     command: ["8082", "node1:8080", "node2:8081"]
     environment:
       NODE_HOST: node3
-      CLUSTER_NAME: netty-cluster
+      CLUSTER_NAME: coffer-cluster
       RAFT_DATA_DIR: /data
     volumes:
       - node3-data:/data
