@@ -30,6 +30,7 @@ class RaftServiceTest {
     private static final Node LOCAL = new Node("n1", "127.0.0.1", 8080);
     private static final Node PEER2 = new Node("n2", "127.0.0.1", 8081);
     private static final Node PEER3 = new Node("n3", "127.0.0.1", 8082);
+    private static final Node PEER4 = new Node("n4", "127.0.0.1", 8083);
 
     private final FakeTransport transport = new FakeTransport();
     private final AtomicLong clock = new AtomicLong();
@@ -274,6 +275,69 @@ class RaftServiceTest {
     }
 
     @Test
+    void addNodeCommitsAndUpdatesConfiguration() throws Exception {
+        afterDiscovery();
+        raft.tick();
+        assertTrue(raft.configuration().isEmpty());
+
+        var index = raft.addNode(PEER2).get(1, TimeUnit.SECONDS);
+
+        assertTrue(index > 0);
+        assertEquals(List.of(PEER2), raft.configuration());
+    }
+
+    @Test
+    void removeNodeCommitsAndUpdatesConfiguration() throws Exception {
+        afterDiscovery();
+        raft.tick();
+        raft.addNode(PEER2).get(1, TimeUnit.SECONDS);
+
+        var future = raft.removeNode(PEER2.id());
+
+        transport.completeAppend(PEER2, 1, true, raft.lastIndex());
+
+        future.get(1, TimeUnit.SECONDS);
+
+        assertTrue(raft.configuration().isEmpty());
+    }
+
+    @Test
+    void rejectsAConcurrentConfigurationChange() {
+        afterDiscovery();
+        raft.tick();
+        raft.addNode(PEER2).join();
+
+        raft.addNode(PEER3);
+
+        var cause = raft.addNode(PEER4).handle((value, error) -> error).join();
+
+        assertTrue(cause instanceof IllegalStateException);
+    }
+
+    @Test
+    void configurationEntriesAreNotAppliedToTheStateMachine() {
+        var machine = new RecordingStateMachine();
+        raft.setStateMachine(machine);
+        afterDiscovery();
+        raft.tick();
+
+        raft.addNode(PEER2).join();
+
+        assertTrue(machine.commands.isEmpty());
+    }
+
+    @Test
+    void configurationSurvivesRestart() {
+        afterDiscovery();
+        raft.tick();
+        raft.addNode(PEER2).join();
+
+        raft = newRaft();
+
+        assertEquals(List.of(PEER2), raft.configuration());
+    }
+
+    @Test
     void installSnapshotReplacesLogAndContinues() {
         var machine = new RecordingStateMachine();
         raft.setStateMachine(machine);
@@ -376,10 +440,14 @@ class RaftServiceTest {
 
     static final class RecordingStateMachine implements RaftStateMachine {
 
+        final List<String> commands = new ArrayList<>();
         private byte[] restored;
 
         @Override
         public void apply(RaftProtocol.LogEntry entry) {
+            if (!entry.getCommand().isEmpty()) {
+                commands.add(entry.getCommand().toStringUtf8());
+            }
         }
 
         @Override

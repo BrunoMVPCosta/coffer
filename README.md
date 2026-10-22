@@ -72,12 +72,11 @@ same transport:
   commit index from `leaderCommit`
 - a committed entry is handed to the registered applier in log order, which is
   the hook for a state machine such as a key-value store
-- the Raft configuration is the **seed roster**, fixed for the lifetime of the
-  process: every node must be given the same peers, and quorum is computed from
-  that roster only. Discovery still maintains the address book and liveness
-  hints, but later membership changes never shrink the majority needed to
-  commit. Adding or removing a node requires restarting the cluster with the
-  new roster (until Raft configuration changes are implemented)
+- the seed roster is the initial configuration. The leader can add or remove
+  one node at a time with a configuration entry in the log; the new
+  configuration takes effect when that entry commits. Only one change may be
+  in flight, and a leader removed from the configuration does not step down on
+  its own (joint consensus is not implemented)
 
 ### Persistence
 
@@ -207,7 +206,8 @@ NODE_HOST=127.0.0.1 mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvp
 ## Future work
 
 - Add integration tests to the transport layer
-- Implement Raft configuration changes instead of a static roster
+- Implement joint consensus for overlapping configuration changes
+- Step the leader down when it is removed from the configuration
 
 ## License
 

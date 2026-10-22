@@ -55,9 +55,11 @@ Stop it with `docker compose down`.
 
 ## Design constraints
 
-- The Raft configuration is the static seed roster. Never derive quorum from
-  live cluster membership; a shrinking view must not shrink the majority.
-  Every node must be given the same peers.
+- The seed roster is the initial Raft configuration. Configuration changes are
+  single-server changes appended to the log: `addNode` and `removeNode` on the
+  leader, applied when the entry commits, one change at a time. Quorum comes
+  from the committed configuration, never from live discovery. Joint consensus
+  and automatic leader step-down on removal are not implemented.
 - Membership merges are last-writer-wins by incarnation and then state
   (`DEAD` over `SUSPECT` over `ALIVE`). Dead nodes stay as tombstones.
 - The transport pools one connection per address. Use `sendAndReceive` for RPC
@@ -93,6 +95,7 @@ Stop it with `docker compose down`.
 - The Docker three-node demo still converges and elects a single leader.
 - A KV write is visible on all nodes and survives a cluster restart.
 - A snapshot restores the KV state after restart and compacts the log.
+- A configuration change commits and survives a restart.
 - README is updated when behavior or commands change.
 - New protocol fields or messages have a round-trip or state-machine test.
 

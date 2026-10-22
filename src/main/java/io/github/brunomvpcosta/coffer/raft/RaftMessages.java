@@ -3,6 +3,7 @@ package io.github.brunomvpcosta.coffer.raft;
 import java.util.Collection;
 
 import com.google.protobuf.ByteString;
+import io.github.brunomvpcosta.coffer.cluster.Node;
 import io.github.brunomvpcosta.coffer.protocol.RaftProtocol;
 
 public final class RaftMessages {
@@ -87,6 +88,29 @@ public final class RaftMessages {
             .setIndex(index)
             .setTerm(term)
             .setCommand(ByteString.copyFrom(command))
+            .setKind(RaftProtocol.EntryKind.ENTRY_COMMAND)
             .build();
+    }
+
+    public static RaftProtocol.LogEntry configurationEntry(long index, long term, Collection<Node> nodes) {
+        return RaftProtocol.LogEntry.newBuilder()
+            .setIndex(index)
+            .setTerm(term)
+            .setKind(RaftProtocol.EntryKind.ENTRY_CONFIGURATION)
+            .setConfiguration(configuration(nodes))
+            .build();
+    }
+
+    public static RaftProtocol.Configuration configuration(Collection<Node> nodes) {
+        var builder = RaftProtocol.Configuration.newBuilder();
+
+        for (var node : nodes) {
+            builder.addPeers(RaftProtocol.Peer.newBuilder()
+                .setId(node.id())
+                .setHost(node.host())
+                .setPort(node.port()));
+        }
+
+        return builder.build();
     }
 }

@@ -13,6 +13,7 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 import io.github.brunomvpcosta.coffer.cluster.Node;
@@ -108,6 +109,21 @@ class RaftClusterTest {
 
         assertEquals(1, nodes.stream().filter(RaftService::isLeader).count());
         assertEquals(newLeader.currentTerm(), oldLeader.currentTerm());
+    }
+
+    @Test
+    void leaderAddsAndRemovesNodes() throws Exception {
+        elect();
+        var leader = leader();
+        var n4 = new Node("n4", "127.0.0.1", 8083);
+
+        leader.addNode(n4).get(1, TimeUnit.SECONDS);
+
+        assertTrue(leader.configuration().stream().anyMatch(node -> node.id().equals(n4.id())));
+
+        leader.removeNode(N3.id()).get(1, TimeUnit.SECONDS);
+
+        assertTrue(leader.configuration().stream().noneMatch(node -> node.id().equals(N3.id())));
     }
 
     private void start(Node... definitions) {

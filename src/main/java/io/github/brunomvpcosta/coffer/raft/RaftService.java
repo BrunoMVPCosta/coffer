@@ -110,11 +110,10 @@ public class RaftService implements RaftMessageHandler {
     };
 
     /**
-     * Immutable Raft configuration (peers, excluding the local node). Passing a
-     * roster that differs from another node's roster breaks quorum safety, so
-     * every node must be given the same set of peers.
+     * Raft configuration (peers, excluding the local node). It starts as the
+     * seed roster and is replaced by configuration entries in the log.
      */
-    private final List<Node> configuration;
+    private List<Node> configuration;
 
     public RaftService(Node self, Collection<Node> peers, Transport transport, RaftStorage storage) {
         this(self, peers, transport, storage, DEFAULT_SNAPSHOT_THRESHOLD,
@@ -170,15 +169,19 @@ public class RaftService implements RaftMessageHandler {
         this.electionMaxMs = electionMaxMs;
         this.clock = Objects.requireNonNull(clock);
         this.random = Objects.requireNonNull(random);
-        this.configuration = peers.stream()
+        this.configuration = new ArrayList<>(peers.stream()
             .filter(node -> !node.id().equals(self.id()))
             .distinct()
-            .toList();
+            .toList());
 
         var loadedSnapshot = storage.loadSnapshot();
 
         if (loadedSnapshot != null) {
             this.snapshot = loadedSnapshot;
+        }
+
+        if (snapshot.getConfiguration().getPeersCount() > 0) {
+            this.configuration = new ArrayList<>(fromProto(snapshot.getConfiguration()));
         }
 
         this.logBaseIndex = snapshot.getLastIncludedIndex();
@@ -202,6 +205,10 @@ public class RaftService implements RaftMessageHandler {
             }
 
             log.add(entry);
+
+            if (entry.getKind() == RaftProtocol.EntryKind.ENTRY_CONFIGURATION) {
+                this.configuration = new ArrayList<>(fromProto(entry.getConfiguration()));
+            }
         }
 
         this.currentTerm = Math.max(this.currentTerm, lastLogTerm());
@@ -264,16 +271,108 @@ public class RaftService implements RaftMessageHandler {
             throw new IllegalStateException("not the leader: " + role);
         }
 
+        return appendEntry(RaftMessages.entry(0, 0, command));
+    }
+
+    /**
+     * Adds a peer to the configuration as a single-server change.
+     */
+    public synchronized CompletableFuture<Long> addNode(Node node) {
+        if (role != Role.LEADER) {
+            return CompletableFuture.failedFuture(new RaftNotLeaderException(leaderId));
+        }
+
+        if (node == null || node.id().equals(self.id())) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("invalid node"));
+        }
+
+        if (configuration.stream().anyMatch(existing -> existing.id().equals(node.id()))) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("node already in the configuration"));
+        }
+
+        if (configurationChangePending()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("configuration change in progress"));
+        }
+
+        var next = new ArrayList<>(configuration);
+        next.add(node);
+
+        return appendEntry(RaftMessages.configurationEntry(0, 0, next));
+    }
+
+    /**
+     * Removes a peer from the configuration as a single-server change.
+     */
+    public synchronized CompletableFuture<Long> removeNode(String id) {
+        if (role != Role.LEADER) {
+            return CompletableFuture.failedFuture(new RaftNotLeaderException(leaderId));
+        }
+
+        if (id == null || id.equals(self.id())) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("cannot remove the local node"));
+        }
+
+        if (configuration.stream().noneMatch(existing -> existing.id().equals(id))) {
+            return CompletableFuture.failedFuture(
+                new IllegalArgumentException("node is not in the configuration"));
+        }
+
+        if (configurationChangePending()) {
+            return CompletableFuture.failedFuture(
+                new IllegalStateException("configuration change in progress"));
+        }
+
+        var next = configuration.stream().filter(node -> !node.id().equals(id)).toList();
+
+        return appendEntry(RaftMessages.configurationEntry(0, 0, next));
+    }
+
+    private synchronized CompletableFuture<Long> appendEntry(RaftProtocol.LogEntry entry) {
         var index = lastLogIndex() + 1;
         var applied = new CompletableFuture<Long>();
         applyWaiters.put(index, applied);
-        log.add(RaftMessages.entry(index, currentTerm, command));
+        log.add(entry.toBuilder().setIndex(index).setTerm(currentTerm).build());
         persist();
 
         advanceCommitIndex();
         sendHeartbeats();
 
         return applied;
+    }
+
+    private boolean configurationChangePending() {
+        for (var index = commitIndex + 1; index <= lastLogIndex(); index++) {
+            if (entryAt(index).getKind() == RaftProtocol.EntryKind.ENTRY_CONFIGURATION) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void applyConfiguration(RaftProtocol.Configuration config) {
+        configuration = new ArrayList<>(fromProto(config));
+
+        var ids = configuration.stream().map(Node::id).toList();
+        nextIndex.keySet().retainAll(ids);
+        matchIndex.keySet().retainAll(ids);
+
+        for (var peer : configuration) {
+            nextIndex.putIfAbsent(peer.id(), lastLogIndex() + 1);
+            matchIndex.putIfAbsent(peer.id(), 0L);
+        }
+
+        log("configuration: " + ids);
+    }
+
+    private List<Node> fromProto(RaftProtocol.Configuration config) {
+        return config.getPeersList().stream()
+            .map(peer -> new Node(peer.getId(), peer.getHost(), peer.getPort()))
+            .filter(node -> !node.id().equals(self.id()))
+            .toList();
     }
 
     @Override
@@ -480,6 +579,10 @@ public class RaftService implements RaftMessageHandler {
         lastSnapshotIndex = logBaseIndex;
         snapshot = incoming;
 
+        if (incoming.getConfiguration().getPeersCount() > 0) {
+            configuration = new ArrayList<>(fromProto(incoming.getConfiguration()));
+        }
+
         storage.saveSnapshot(incoming);
         stateMachine.restore(incoming.getData().toByteArray());
         persist();
@@ -685,10 +788,14 @@ public class RaftService implements RaftMessageHandler {
             RuntimeException failure = null;
 
             try {
-                stateMachine.apply(entry);
+                if (entry.getKind() == RaftProtocol.EntryKind.ENTRY_CONFIGURATION) {
+                    applyConfiguration(entry.getConfiguration());
+                } else {
+                    stateMachine.apply(entry);
+                }
             } catch (RuntimeException ex) {
                 failure = ex;
-                log("state machine failed at index " + entry.getIndex() + ": " + ex);
+                log("apply failed at index " + entry.getIndex() + ": " + ex);
             } finally {
                 var waiter = applyWaiters.remove(entry.getIndex());
 
@@ -726,6 +833,7 @@ public class RaftService implements RaftMessageHandler {
             .setLastIncludedIndex(index)
             .setLastIncludedTerm(termAt(index))
             .setData(com.google.protobuf.ByteString.copyFrom(data))
+            .setConfiguration(RaftMessages.configuration(configuration))
             .build();
 
         snapshotInProgress = true;
@@ -953,6 +1061,13 @@ public class RaftService implements RaftMessageHandler {
 
     public synchronized Node self() {
         return self;
+    }
+
+    /**
+     * @return the current configuration (peers, excluding the local node)
+     */
+    public synchronized List<Node> configuration() {
+        return List.copyOf(configuration);
     }
 
     public synchronized Node leader() {

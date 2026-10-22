@@ -5,10 +5,27 @@ package coffer.raft;
 option java_package = "io.github.brunomvpcosta.coffer.protocol";
 option java_outer_classname = "RaftProtocol";
 
+message Peer {
+  string id = 1;
+  string host = 2;
+  uint32 port = 3;
+}
+
+message Configuration {
+  repeated Peer peers = 1;
+}
+
+enum EntryKind {
+  ENTRY_COMMAND = 0;
+  ENTRY_CONFIGURATION = 1;
+}
+
 message LogEntry {
   uint64 index = 1;
   uint64 term = 2;
   bytes command = 3;
+  EntryKind kind = 4;
+  Configuration configuration = 5;
 }
 
 message RequestVote {
@@ -42,6 +59,7 @@ message Snapshot {
   uint64 last_included_index = 1;
   uint64 last_included_term = 2;
   bytes data = 3;
+  Configuration configuration = 4;
 }
 
 message InstallSnapshot {
