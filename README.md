@@ -2,9 +2,23 @@
   <img src="docs/logo.svg" alt="Coffer" width="640">
 </p>
 
+<p align="center">
+  <a href="https://github.com/BrunoMVPCosta/coffer/actions/workflows/ci.yml">
+    <img src="https://github.com/BrunoMVPCosta/coffer/actions/workflows/ci.yml/badge.svg" alt="CI">
+  </a>
+  <a href="LICENSE">
+    <img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="License: MIT">
+  </a>
+</p>
+
 Coffer is a small distributed key-value store built in Java 21 on a custom
 Netty transport, gossip membership, and Raft consensus. Writes are replicated
 through a Raft log; reads are served by the node you contact.
+
+<p align="center">
+  <a href="https://brunomvpcosta.github.io/coffer/">Project page</a> ·
+  <a href="https://github.com/BrunoMVPCosta/coffer">Source</a>
+</p>
 
 ## Discovery
 
@@ -174,3 +188,7 @@ NODE_HOST=127.0.0.1 mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvp
 - Add integration tests to the transport layer
 - Add snapshots/compaction and linearizable reads (ReadIndex or leader lease)
 - Implement Raft configuration changes instead of a static roster
+
+## License
+
+MIT. See [LICENSE](LICENSE).
