@@ -16,7 +16,7 @@ Netty transport, gossip membership, and Raft consensus. Writes are replicated
 through a Raft log; reads are served by the node you contact.
 
 <p align="center">
-  <a href="https://brunomvpcosta.github.io/coffer/">Project page</a> ·
+  <a href="https://www.thrownewexception.com/coffer/">Project page</a> ·
   <a href="https://github.com/BrunoMVPCosta/coffer">Source</a>
 </p>
 
