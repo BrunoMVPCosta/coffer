@@ -176,6 +176,73 @@ class RaftServiceTest {
     }
 
     @Test
+    void snapshotsAndCompactsAppliedLog() {
+        raft = newRaft(2);
+        raft.setStateMachine(new RecordingStateMachine());
+        afterDiscovery();
+        raft.tick();
+
+        assertEquals(1, raft.lastIndex());
+        assertEquals(0, raft.snapshotIndex());
+
+        raft.append(bytes("a"));
+
+        assertEquals(2, raft.snapshotIndex());
+        assertEquals(2, storage.loadSnapshot().getLastIncludedIndex());
+        assertEquals(0, raft.logSize());
+        assertEquals(2, raft.lastIndex());
+    }
+
+    @Test
+    void snapshotSurvivesRestart() {
+        raft = newRaft(2);
+        raft.setStateMachine(new RecordingStateMachine());
+        afterDiscovery();
+        raft.tick();
+        raft.append(bytes("a"));
+
+        assertEquals(0, raft.logSize());
+        assertEquals(2, raft.snapshotIndex());
+
+        raft = newRaft(2);
+
+        assertEquals(2, raft.snapshotIndex());
+        assertEquals(2, raft.lastIndex());
+        assertEquals(0, raft.logSize());
+        assertEquals(2, raft.commitIndex());
+    }
+
+    @Test
+    void installSnapshotReplacesLogAndContinues() {
+        var machine = new RecordingStateMachine();
+        raft.setStateMachine(machine);
+
+        raft.handle(RaftMessages.appendEntries(1, PEER2.id(), 0, 0,
+            List.of(RaftMessages.entry(1, 1, bytes("a")), RaftMessages.entry(2, 1, bytes("b"))), 0));
+
+        assertEquals(2, raft.lastIndex());
+
+        var snapshot = RaftMessages.snapshot(4, 1, bytes("snapshot"));
+        var response = raft.handle(RaftMessages.installSnapshot(1, PEER2.id(), snapshot));
+
+        assertTrue(response.getInstallSnapshotResponse().getSuccess());
+        assertEquals(4, response.getInstallSnapshotResponse().getMatchIndex());
+        assertEquals(0, raft.logSize());
+        assertEquals(4, raft.lastIndex());
+        assertEquals(4, raft.snapshotIndex());
+        assertEquals(4, raft.commitIndex());
+        assertEquals("snapshot", new String(machine.restored, StandardCharsets.UTF_8));
+        assertEquals(4, storage.loadSnapshot().getLastIncludedIndex());
+
+        var append = raft.handle(RaftMessages.appendEntries(1, PEER2.id(), 4, 1,
+            List.of(RaftMessages.entry(5, 1, bytes("c"))), 4));
+
+        assertTrue(append.getAppendEntriesResponse().getSuccess());
+        assertEquals(1, raft.logSize());
+        assertEquals(5, raft.lastIndex());
+    }
+
+    @Test
     void termAndVoteSurviveRestart() {
         var granted = raft.handle(RaftMessages.requestVote(5, PEER2.id(), 0, 0));
         assertTrue(granted.getRequestVoteResponse().getVoteGranted());
@@ -219,8 +286,13 @@ class RaftServiceTest {
     }
 
     private RaftService newRaft(Node... peers) {
+        return newRaft(1024, peers);
+    }
+
+    private RaftService newRaft(long threshold, Node... peers) {
         return new RaftService(
-            LOCAL, List.of(peers), transport, storage, 50, 100, 200, clock::get, new Random(7));
+            LOCAL, List.of(peers), transport, storage, threshold,
+            50, 100, 200, clock::get, new Random(7));
     }
 
     private void afterDiscovery() {
@@ -229,6 +301,25 @@ class RaftServiceTest {
 
     private static byte[] bytes(String value) {
         return value.getBytes(StandardCharsets.UTF_8);
+    }
+
+    static final class RecordingStateMachine implements RaftStateMachine {
+
+        private byte[] restored;
+
+        @Override
+        public void apply(RaftProtocol.LogEntry entry) {
+        }
+
+        @Override
+        public byte[] snapshot() {
+            return "state".getBytes(StandardCharsets.UTF_8);
+        }
+
+        @Override
+        public void restore(byte[] snapshot) {
+            this.restored = snapshot;
+        }
     }
 
     static final class FakeTransport implements Transport {

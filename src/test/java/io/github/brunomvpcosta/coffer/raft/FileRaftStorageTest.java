@@ -57,4 +57,21 @@ class FileRaftStorageTest {
         assertEquals(2, state.getCurrentTerm());
         assertEquals("node-3", state.getVotedFor());
     }
+
+    @Test
+    void roundTripsSnapshot() {
+        var storage = new FileRaftStorage(directory);
+        var snapshot = RaftMessages.snapshot(5, 2, "kv-state".getBytes(StandardCharsets.UTF_8));
+
+        storage.saveSnapshot(snapshot);
+
+        assertEquals(snapshot, storage.loadSnapshot());
+    }
+
+    @Test
+    void missingSnapshotReturnsEmptyState() {
+        var storage = new FileRaftStorage(directory);
+
+        assertEquals(0, storage.loadSnapshot().getLastIncludedIndex());
+    }
 }

@@ -91,8 +91,10 @@ public class ClusterNode {
             }
         }
 
+        var snapshotThreshold = Long.parseLong(
+            System.getenv().getOrDefault("RAFT_SNAPSHOT_THRESHOLD", "1024"));
         var raftService = new RaftService(localNode, raftPeers, transport,
-            new FileRaftStorage(raftDataDirectory(localNode)));
+            new FileRaftStorage(raftDataDirectory(localNode)), snapshotThreshold);
         var kvService = new KvService(raftService, transport, new KvStateMachine());
 
         serverBootstrap
@@ -114,6 +116,7 @@ public class ClusterNode {
             System.out.println("\tSeed: " + seed.host() + ":" + seed.port());
         }
         System.out.println("Raft state: " + raftDataDirectory(localNode).toAbsolutePath());
+        System.out.println("Snapshot threshold: " + snapshotThreshold + " applied entries");
 
         clusterService.start();
         raftService.start();

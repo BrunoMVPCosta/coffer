@@ -63,9 +63,15 @@ Stop it with `docker compose down`.
 - The transport pools one connection per address. Use `sendAndReceive` for RPC
   and `send` for fire-and-forget messages.
 - Raft term, vote and log are persisted through `RaftStorage`.
-  `FileRaftStorage` rewrites the whole log atomically; there is no separate
-  write-ahead log yet. The commit index and the state machine are rebuilt from
-  the log, so do not introduce a second source of truth.
+  `FileRaftStorage` writes `raft-state.bin` and `raft-snapshot.bin` atomically.
+  There is no write-ahead log; the whole log is rewritten, so snapshots are
+  what keep it bounded.
+- State machines implement `RaftStateMachine` and must support `snapshot()` and
+  `restore(byte[])`. A snapshot is taken every `RAFT_SNAPSHOT_THRESHOLD` applied
+  entries (`0` disables it) and the log is truncated before the snapshot index.
+  `InstallSnapshot` catches up lagging peers.
+- Never introduce a second source of truth for replicated state: the Raft log
+  and snapshots are the only durability path.
 - The leader appends a no-op entry when elected; state machines must ignore
   empty commands.
 - KV writes are leader-only and followers forward them. Reads are served from
@@ -82,6 +88,7 @@ Stop it with `docker compose down`.
 - `mvn test` passes (or the Docker equivalent above).
 - The Docker three-node demo still converges and elects a single leader.
 - A KV write is visible on all nodes and survives a cluster restart.
+- A snapshot restores the KV state after restart and compacts the log.
 - README is updated when behavior or commands change.
 - New protocol fields or messages have a round-trip or state-machine test.
 

@@ -121,6 +121,26 @@ class KvServiceTest {
         assertEquals("1", read.getValue().toStringUtf8());
     }
 
+    @Test
+    void snapshotRestoresKvStateAfterRestart() throws Exception {
+        createRaft(2);
+        clock.set(10_000);
+        raft.tick();
+        call(put("a", "1"));
+
+        assertEquals(2, storage.loadSnapshot().getLastIncludedIndex());
+        assertEquals(0, raft.logSize());
+
+        raft = new RaftService(LOCAL, List.of(), transport, storage, 2,
+            50, 100, 200, clock::get, new Random(7));
+        kv = new KvService(raft, transport, new KvStateMachine());
+
+        var read = call(get("a"));
+
+        assertEquals(KvProtocol.KvResponse.Status.STATUS_OK, read.getStatus());
+        assertEquals("1", read.getValue().toStringUtf8());
+    }
+
     private void startSingleNodeLeader() {
         createRaft();
         clock.set(10_000);
@@ -129,8 +149,12 @@ class KvServiceTest {
     }
 
     private void createRaft(Node... peers) {
+        createRaft(1024, peers);
+    }
+
+    private void createRaft(long snapshotThreshold, Node... peers) {
         raft = new RaftService(LOCAL, List.of(peers), transport, storage,
-            50, 100, 200, clock::get, new Random(7));
+            snapshotThreshold, 50, 100, 200, clock::get, new Random(7));
         kv = new KvService(raft, transport, new KvStateMachine());
     }
 

@@ -46,11 +46,13 @@ public class RaftService implements RaftMessageHandler {
     private static final long DEFAULT_HEARTBEAT_MS = 300;
     private static final long DEFAULT_ELECTION_MIN_MS = 1000;
     private static final long DEFAULT_ELECTION_MAX_MS = 2000;
+    private static final long DEFAULT_SNAPSHOT_THRESHOLD = 1024;
     private static final long DISCOVERY_GRACE_MS = 3000;
     private static final long TICK_MS = 50;
 
     private final Node self;
     private final Transport transport;
+    private final long snapshotThreshold;
     private final long heartbeatMs;
     private final long electionMinMs;
     private final long electionMaxMs;
@@ -77,7 +79,24 @@ public class RaftService implements RaftMessageHandler {
     private long lastApplied;
     private long electionDeadlineMs;
     private long nextHeartbeatMs;
-    private Consumer<RaftProtocol.LogEntry> applier = entry -> { };
+    private long logBaseIndex;
+    private long logBaseTerm;
+    private long lastSnapshotIndex;
+    private RaftProtocol.Snapshot snapshot = RaftProtocol.Snapshot.getDefaultInstance();
+    private RaftStateMachine stateMachine = new RaftStateMachine() {
+        @Override
+        public void apply(RaftProtocol.LogEntry entry) {
+        }
+
+        @Override
+        public byte[] snapshot() {
+            return new byte[0];
+        }
+
+        @Override
+        public void restore(byte[] snapshot) {
+        }
+    };
 
     /**
      * Immutable Raft configuration (peers, excluding the local node). Passing a
@@ -87,7 +106,19 @@ public class RaftService implements RaftMessageHandler {
     private final List<Node> configuration;
 
     public RaftService(Node self, Collection<Node> peers, Transport transport, RaftStorage storage) {
-        this(self, peers, transport, storage,
+        this(self, peers, transport, storage, DEFAULT_SNAPSHOT_THRESHOLD,
+            DEFAULT_HEARTBEAT_MS, DEFAULT_ELECTION_MIN_MS, DEFAULT_ELECTION_MAX_MS,
+            System::currentTimeMillis, new Random());
+    }
+
+    public RaftService(
+        Node self,
+        Collection<Node> peers,
+        Transport transport,
+        RaftStorage storage,
+        long snapshotThreshold) {
+
+        this(self, peers, transport, storage, snapshotThreshold,
             DEFAULT_HEARTBEAT_MS, DEFAULT_ELECTION_MIN_MS, DEFAULT_ELECTION_MAX_MS,
             System::currentTimeMillis, new Random());
     }
@@ -103,9 +134,26 @@ public class RaftService implements RaftMessageHandler {
         LongSupplier clock,
         Random random) {
 
+        this(self, peers, transport, storage, DEFAULT_SNAPSHOT_THRESHOLD,
+            heartbeatMs, electionMinMs, electionMaxMs, clock, random);
+    }
+
+    public RaftService(
+        Node self,
+        Collection<Node> peers,
+        Transport transport,
+        RaftStorage storage,
+        long snapshotThreshold,
+        long heartbeatMs,
+        long electionMinMs,
+        long electionMaxMs,
+        LongSupplier clock,
+        Random random) {
+
         this.self = Objects.requireNonNull(self);
         this.transport = Objects.requireNonNull(transport);
         this.storage = Objects.requireNonNull(storage);
+        this.snapshotThreshold = snapshotThreshold;
         this.heartbeatMs = heartbeatMs;
         this.electionMinMs = electionMinMs;
         this.electionMaxMs = electionMaxMs;
@@ -116,15 +164,32 @@ public class RaftService implements RaftMessageHandler {
             .distinct()
             .toList();
 
+        var loadedSnapshot = storage.loadSnapshot();
+
+        if (loadedSnapshot != null) {
+            this.snapshot = loadedSnapshot;
+        }
+
+        this.logBaseIndex = snapshot.getLastIncludedIndex();
+        this.logBaseTerm = snapshot.getLastIncludedTerm();
+        this.lastSnapshotIndex = logBaseIndex;
+        this.commitIndex = logBaseIndex;
+        this.lastApplied = logBaseIndex;
+
         var state = storage.load();
         this.currentTerm = state.getCurrentTerm();
         this.votedFor = state.getVotedFor().isEmpty() ? null : state.getVotedFor();
 
         for (var entry : state.getLogList()) {
-            if (entry.getIndex() != log.size() + 1) {
-                throw new IllegalStateException("Corrupt Raft log: expected index "
-                    + (log.size() + 1) + " but found " + entry.getIndex());
+            if (entry.getIndex() <= logBaseIndex) {
+                continue;
             }
+
+            if (entry.getIndex() != logBaseIndex + log.size() + 1) {
+                throw new IllegalStateException("Corrupt Raft log: expected index "
+                    + (logBaseIndex + log.size() + 1) + " but found " + entry.getIndex());
+            }
+
             log.add(entry);
         }
 
@@ -142,10 +207,38 @@ public class RaftService implements RaftMessageHandler {
     }
 
     /**
-     * Registers the state machine that receives committed entries in order.
+     * Registers a state machine that receives committed entries in order and
+     * can snapshot and restore its state.
+     */
+    public synchronized void setStateMachine(RaftStateMachine stateMachine) {
+        this.stateMachine = Objects.requireNonNull(stateMachine);
+
+        if (snapshot.getLastIncludedIndex() > 0) {
+            stateMachine.restore(snapshot.getData().toByteArray());
+        }
+    }
+
+    /**
+     * Convenience for tests and consumers that do not support snapshots.
      */
     public synchronized void setApplier(Consumer<RaftProtocol.LogEntry> applier) {
-        this.applier = Objects.requireNonNull(applier);
+        var delegate = Objects.requireNonNull(applier);
+
+        this.stateMachine = new RaftStateMachine() {
+            @Override
+            public void apply(RaftProtocol.LogEntry entry) {
+                delegate.accept(entry);
+            }
+
+            @Override
+            public byte[] snapshot() {
+                return new byte[0];
+            }
+
+            @Override
+            public void restore(byte[] snapshot) {
+            }
+        };
     }
 
     /**
@@ -176,6 +269,7 @@ public class RaftService implements RaftMessageHandler {
         return switch (message.getPayloadCase()) {
             case REQUEST_VOTE -> onRequestVote(message.getRequestVote());
             case APPEND_ENTRIES -> onAppendEntries(message.getAppendEntries());
+            case INSTALL_SNAPSHOT -> onInstallSnapshot(message.getInstallSnapshot());
             default -> null;
         };
     }
@@ -302,6 +396,10 @@ public class RaftService implements RaftMessageHandler {
         votesGranted.clear();
         resetElectionTimeout();
 
+        if (request.getPrevLogIndex() < logBaseIndex) {
+            return RaftMessages.appendEntriesResponse(currentTerm, false, lastLogIndex());
+        }
+
         if (request.getPrevLogIndex() > lastLogIndex()
             || termAt(request.getPrevLogIndex()) != request.getPrevLogTerm()) {
             return RaftMessages.appendEntriesResponse(currentTerm, false, lastLogIndex());
@@ -339,6 +437,44 @@ public class RaftService implements RaftMessageHandler {
         }
 
         return RaftMessages.appendEntriesResponse(currentTerm, true, lastLogIndex());
+    }
+
+    private RaftProtocol.RaftMessage onInstallSnapshot(RaftProtocol.InstallSnapshot request) {
+        if (request.getTerm() < currentTerm) {
+            return RaftMessages.installSnapshotResponse(currentTerm, false, lastLogIndex());
+        }
+
+        if (request.getTerm() > currentTerm) {
+            becomeFollower(request.getTerm());
+        }
+
+        role = Role.FOLLOWER;
+        leaderId = request.getLeaderId();
+        votesGranted.clear();
+        resetElectionTimeout();
+
+        var incoming = request.getSnapshot();
+
+        // An older snapshot is harmless: we already have at least that state.
+        if (incoming.getLastIncludedIndex() <= commitIndex) {
+            return RaftMessages.installSnapshotResponse(currentTerm, true, lastLogIndex());
+        }
+
+        log.clear();
+        logBaseIndex = incoming.getLastIncludedIndex();
+        logBaseTerm = incoming.getLastIncludedTerm();
+        commitIndex = logBaseIndex;
+        lastApplied = logBaseIndex;
+        lastSnapshotIndex = logBaseIndex;
+        snapshot = incoming;
+
+        storage.saveSnapshot(incoming);
+        stateMachine.restore(incoming.getData().toByteArray());
+        persist();
+
+        log("installed snapshot at index " + logBaseIndex);
+
+        return RaftMessages.installSnapshotResponse(currentTerm, true, logBaseIndex);
     }
 
     private synchronized void onAppendEntriesResponse(Node peer, RaftProtocol.AppendEntriesResponse response) {
@@ -418,11 +554,17 @@ public class RaftService implements RaftMessageHandler {
 
     private void sendAppendEntries(Node peer) {
         var next = nextIndex.getOrDefault(peer.id(), lastLogIndex() + 1);
-        var previous = Math.max(0, next - 1);
+
+        if (next <= logBaseIndex) {
+            sendInstallSnapshot(peer);
+            return;
+        }
+
+        var previous = next - 1;
         var entries = new ArrayList<RaftProtocol.LogEntry>();
 
         for (long index = next; index <= lastLogIndex(); index++) {
-            entries.add(log.get((int) index - 1));
+            entries.add(entryAt(index));
         }
 
         var request = RaftMessages.appendEntries(
@@ -443,6 +585,55 @@ public class RaftService implements RaftMessageHandler {
                     log("invalid append response: " + ex.getMessage());
                 }
             });
+    }
+
+    private void sendInstallSnapshot(Node peer) {
+        if (snapshot.getLastIncludedIndex() == 0) {
+            return;
+        }
+
+        var request = RaftMessages.installSnapshot(currentTerm, selfId(), snapshot);
+
+        transport.sendAndReceive(address(peer), request.toByteArray(), MessageKind.RAFT)
+            .whenComplete((payload, cause) -> {
+                if (cause != null) {
+                    return;
+                }
+
+                try {
+                    var response = RaftProtocol.RaftMessage.parseFrom(payload);
+                    if (response.hasInstallSnapshotResponse()) {
+                        onInstallSnapshotResponse(peer, response.getInstallSnapshotResponse());
+                    }
+                } catch (InvalidProtocolBufferException ex) {
+                    log("invalid snapshot response: " + ex.getMessage());
+                }
+            });
+    }
+
+    private synchronized void onInstallSnapshotResponse(Node peer, RaftProtocol.InstallSnapshotResponse response) {
+        if (response.getTerm() > currentTerm) {
+            becomeFollower(response.getTerm());
+            return;
+        }
+
+        if (role != Role.LEADER || response.getTerm() < currentTerm) {
+            return;
+        }
+
+        if (response.getSuccess()) {
+            matchIndex.merge(peer.id(), response.getMatchIndex(), Math::max);
+            nextIndex.put(peer.id(), matchIndex.getOrDefault(peer.id(), 0L) + 1);
+            advanceCommitIndex();
+            return;
+        }
+
+        // The follower may already be ahead of the snapshot it rejected.
+        if (response.getMatchIndex() > 0) {
+            matchIndex.merge(peer.id(), response.getMatchIndex(), Math::max);
+            nextIndex.put(peer.id(), matchIndex.getOrDefault(peer.id(), 0L) + 1);
+            sendAppendEntries(peer);
+        }
     }
 
     private void advanceCommitIndex() {
@@ -470,14 +661,14 @@ public class RaftService implements RaftMessageHandler {
     private void applyCommitted() {
         while (lastApplied < commitIndex) {
             lastApplied++;
-            var entry = log.get((int) lastApplied - 1);
+            var entry = entryAt(lastApplied);
             RuntimeException failure = null;
 
             try {
-                applier.accept(entry);
+                stateMachine.apply(entry);
             } catch (RuntimeException ex) {
                 failure = ex;
-                log("applier failed at index " + entry.getIndex() + ": " + ex);
+                log("state machine failed at index " + entry.getIndex() + ": " + ex);
             } finally {
                 var waiter = applyWaiters.remove(entry.getIndex());
 
@@ -489,11 +680,60 @@ public class RaftService implements RaftMessageHandler {
                     }
                 }
             }
+
+            if (failure == null) {
+                maybeSnapshot();
+            }
         }
     }
 
+    private void maybeSnapshot() {
+        if (snapshotThreshold <= 0 || lastApplied - lastSnapshotIndex < snapshotThreshold) {
+            return;
+        }
+
+        var data = stateMachine.snapshot();
+
+        if (data.length == 0) {
+            return;
+        }
+
+        var index = lastApplied;
+        var term = termAt(index);
+        var next = RaftProtocol.Snapshot.newBuilder()
+            .setLastIncludedIndex(index)
+            .setLastIncludedTerm(term)
+            .setData(com.google.protobuf.ByteString.copyFrom(data))
+            .build();
+
+        storage.saveSnapshot(next);
+        snapshot = next;
+        compactTo(index, term);
+        lastSnapshotIndex = index;
+        persist();
+
+        log("snapshot at index " + index + ", log entries: " + log.size());
+    }
+
+    private void compactTo(long index, long term) {
+        var remove = (int) Math.min(log.size(), Math.max(0, index - logBaseIndex));
+
+        if (remove > 0) {
+            log.subList(0, remove).clear();
+        }
+
+        logBaseIndex = index;
+        logBaseTerm = term;
+    }
+
     private void truncateFrom(long index) {
-        while (lastLogIndex() >= index) {
+        if (index <= logBaseIndex) {
+            return;
+        }
+
+        var offset = (int) (index - logBaseIndex - 1);
+
+        while (log.size() > offset) {
             var removed = log.remove(log.size() - 1);
             var waiter = applyWaiters.remove(removed.getIndex());
 
@@ -513,19 +753,40 @@ public class RaftService implements RaftMessageHandler {
     }
 
     private long lastLogIndex() {
-        return log.size();
+        return logBaseIndex + log.size();
     }
 
     private long lastLogTerm() {
-        return log.isEmpty() ? 0 : log.get(log.size() - 1).getTerm();
+        return log.isEmpty() ? logBaseTerm : log.get(log.size() - 1).getTerm();
     }
 
     private long termAt(long index) {
-        if (index <= 0 || index > lastLogIndex()) {
+        if (index == logBaseIndex) {
+            return logBaseTerm;
+        }
+
+        if (index < logBaseIndex) {
             return 0;
         }
 
-        return log.get((int) index - 1).getTerm();
+        var offset = index - logBaseIndex - 1;
+
+        if (offset < 0 || offset >= log.size()) {
+            return 0;
+        }
+
+        return log.get((int) offset).getTerm();
+    }
+
+    private RaftProtocol.LogEntry entryAt(long index) {
+        var offset = index - logBaseIndex - 1;
+
+        if (offset < 0 || offset >= log.size()) {
+            throw new IllegalStateException("Log entry " + index + " is not available (base "
+                + logBaseIndex + ", size " + log.size() + ")");
+        }
+
+        return log.get((int) offset);
     }
 
     private int quorum() {
@@ -597,7 +858,15 @@ public class RaftService implements RaftMessageHandler {
     }
 
     public synchronized long logSize() {
+        return log.size();
+    }
+
+    public synchronized long lastIndex() {
         return lastLogIndex();
+    }
+
+    public synchronized long snapshotIndex() {
+        return snapshot.getLastIncludedIndex();
     }
 
     public synchronized long logLastTerm() {

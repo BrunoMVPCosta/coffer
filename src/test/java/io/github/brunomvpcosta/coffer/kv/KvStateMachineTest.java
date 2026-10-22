@@ -44,6 +44,19 @@ class KvStateMachineTest {
         assertEquals(List.of("a", "b"), state.keys());
     }
 
+    @Test
+    void snapshotRoundTripsState() {
+        state.apply(put("a", "1"));
+        state.apply(put("b", "2"));
+
+        var restored = new KvStateMachine();
+        restored.restore(state.snapshot());
+
+        assertArrayEquals(bytes("1"), restored.get("a").orElseThrow());
+        assertArrayEquals(bytes("2"), restored.get("b").orElseThrow());
+        assertEquals(List.of("a", "b"), restored.keys());
+    }
+
     private static KvProtocol.KvCommand put(String key, String value) {
         return KvProtocol.KvCommand.newBuilder()
             .setPut(KvProtocol.Put.newBuilder()

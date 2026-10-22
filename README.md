@@ -81,11 +81,16 @@ same transport:
 
 ### Persistence
 
-The term, vote and log are written to disk through `RaftStorage`.
+The term, vote and compacted log are written to disk through `RaftStorage`.
 `FileRaftStorage` keeps them in `raft-state.bin` and replaces the file
-atomically (write to a temporary file, force it, then rename). The whole log is
-rewritten on every change, which is acceptable for a small cluster and a known
-limitation until snapshots arrive.
+atomically (write to a temporary file, force it, then rename).
+
+The state machine is snapshotted every `RAFT_SNAPSHOT_THRESHOLD` applied entries
+(default 1024; `0` disables snapshots). A snapshot records the last included
+index and term plus the serialized state in `raft-snapshot.bin`, and the log is
+truncated before the snapshot index. A restart restores the snapshot and replays
+only the entries after it, so the log stays bounded instead of growing forever.
+A lagging follower catches up through `InstallSnapshot`.
 
 The data directory comes from `RAFT_DATA_DIR` (default `data/`) and gets one
 subdirectory per node id. Docker Compose mounts a named volume per node at
@@ -186,7 +191,7 @@ NODE_HOST=127.0.0.1 mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvp
 ## Future work
 
 - Add integration tests to the transport layer
-- Add snapshots/compaction and linearizable reads (ReadIndex or leader lease)
+- Add linearizable reads (ReadIndex or leader lease)
 - Implement Raft configuration changes instead of a static roster
 
 ## License

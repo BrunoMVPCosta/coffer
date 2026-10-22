@@ -10,27 +10,32 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 
+import com.google.protobuf.MessageLite;
 import io.github.brunomvpcosta.coffer.protocol.RaftProtocol;
 
 /**
- * Stores the Raft term, vote and log in a single protobuf file.
+ * Stores the Raft term, vote and compacted log in one file, and the latest
+ * snapshot in another.
  *
  * <p>Each save writes a temporary file, forces it to disk, and atomically
- * replaces the previous state. This is intentionally simple: the whole log is
- * rewritten on every change, which is fine for a small cluster but demands
- * snapshots and a segmented log later.</p>
+ * replaces the previous state. The log is rewritten on every change, so
+ * snapshots are what keep it bounded.</p>
  */
 public class FileRaftStorage implements RaftStorage {
 
     private static final String STATE_FILE = "raft-state.bin";
-    private static final String TEMP_FILE = "raft-state.bin.tmp";
+    private static final String STATE_TEMP = "raft-state.bin.tmp";
+    private static final String SNAPSHOT_FILE = "raft-snapshot.bin";
+    private static final String SNAPSHOT_TEMP = "raft-snapshot.bin.tmp";
 
     private final Path directory;
     private final Path stateFile;
+    private final Path snapshotFile;
 
     public FileRaftStorage(Path directory) {
         this.directory = directory;
         this.stateFile = directory.resolve(STATE_FILE);
+        this.snapshotFile = directory.resolve(SNAPSHOT_FILE);
 
         try {
             Files.createDirectories(directory);
@@ -54,8 +59,28 @@ public class FileRaftStorage implements RaftStorage {
 
     @Override
     public void save(RaftProtocol.PersistentState state) {
-        var temp = directory.resolve(TEMP_FILE);
+        writeAtomically(stateFile, directory.resolve(STATE_TEMP), state);
+    }
 
+    @Override
+    public RaftProtocol.Snapshot loadSnapshot() {
+        if (!Files.exists(snapshotFile)) {
+            return RaftProtocol.Snapshot.getDefaultInstance();
+        }
+
+        try (var in = Files.newInputStream(snapshotFile)) {
+            return RaftProtocol.Snapshot.parseFrom(in);
+        } catch (IOException ex) {
+            throw new UncheckedIOException("Could not read " + snapshotFile, ex);
+        }
+    }
+
+    @Override
+    public void saveSnapshot(RaftProtocol.Snapshot snapshot) {
+        writeAtomically(snapshotFile, directory.resolve(SNAPSHOT_TEMP), snapshot);
+    }
+
+    private void writeAtomically(Path target, Path temp, MessageLite message) {
         try {
             try (var channel = FileChannel.open(temp,
                 StandardOpenOption.CREATE,
@@ -63,20 +88,20 @@ public class FileRaftStorage implements RaftStorage {
                 StandardOpenOption.TRUNCATE_EXISTING);
                 var out = Channels.newOutputStream(channel)) {
 
-                state.writeTo(out);
+                message.writeTo(out);
                 out.flush();
                 channel.force(true);
             }
 
             try {
-                Files.move(temp, stateFile,
+                Files.move(temp, target,
                     StandardCopyOption.ATOMIC_MOVE,
                     StandardCopyOption.REPLACE_EXISTING);
             } catch (AtomicMoveNotSupportedException ex) {
-                Files.move(temp, stateFile, StandardCopyOption.REPLACE_EXISTING);
+                Files.move(temp, target, StandardCopyOption.REPLACE_EXISTING);
             }
         } catch (IOException ex) {
-            throw new UncheckedIOException("Could not write " + stateFile, ex);
+            throw new UncheckedIOException("Could not write " + target, ex);
         }
     }
 }

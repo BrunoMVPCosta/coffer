@@ -38,12 +38,32 @@ message AppendEntriesResponse {
   uint64 match_index = 3;
 }
 
+message Snapshot {
+  uint64 last_included_index = 1;
+  uint64 last_included_term = 2;
+  bytes data = 3;
+}
+
+message InstallSnapshot {
+  uint64 term = 1;
+  string leader_id = 2;
+  Snapshot snapshot = 3;
+}
+
+message InstallSnapshotResponse {
+  uint64 term = 1;
+  bool success = 2;
+  uint64 match_index = 3;
+}
+
 message RaftMessage {
   oneof payload {
     RequestVote request_vote = 1;
     RequestVoteResponse request_vote_response = 2;
     AppendEntries append_entries = 3;
     AppendEntriesResponse append_entries_response = 4;
+    InstallSnapshot install_snapshot = 5;
+    InstallSnapshotResponse install_snapshot_response = 6;
   }
 }
 

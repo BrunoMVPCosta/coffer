@@ -32,18 +32,7 @@ public class KvService implements KvMessageHandler {
         this.transport = transport;
         this.state = state;
 
-        raft.setApplier(entry -> {
-            if (entry.getCommand().isEmpty()) {
-                return;
-            }
-
-            try {
-                state.apply(KvProtocol.KvCommand.parseFrom(entry.getCommand()));
-            } catch (InvalidProtocolBufferException ex) {
-                throw new IllegalStateException(
-                    "Invalid KV command at log index " + entry.getIndex(), ex);
-            }
-        });
+        raft.setStateMachine(state);
     }
 
     @Override

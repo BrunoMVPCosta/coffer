@@ -8,6 +8,7 @@ import io.github.brunomvpcosta.coffer.protocol.RaftProtocol;
 public class InMemoryRaftStorage implements RaftStorage {
 
     private RaftProtocol.PersistentState state = RaftProtocol.PersistentState.getDefaultInstance();
+    private RaftProtocol.Snapshot snapshot = RaftProtocol.Snapshot.getDefaultInstance();
 
     @Override
     public synchronized RaftProtocol.PersistentState load() {
@@ -17,5 +18,15 @@ public class InMemoryRaftStorage implements RaftStorage {
     @Override
     public synchronized void save(RaftProtocol.PersistentState state) {
         this.state = state;
+    }
+
+    @Override
+    public synchronized RaftProtocol.Snapshot loadSnapshot() {
+        return snapshot;
+    }
+
+    @Override
+    public synchronized void saveSnapshot(RaftProtocol.Snapshot snapshot) {
+        this.snapshot = snapshot;
     }
 }

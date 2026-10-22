@@ -56,6 +56,32 @@ public final class RaftMessages {
             .build();
     }
 
+    public static RaftProtocol.RaftMessage installSnapshot(long term, String leaderId, RaftProtocol.Snapshot snapshot) {
+        return RaftProtocol.RaftMessage.newBuilder()
+            .setInstallSnapshot(RaftProtocol.InstallSnapshot.newBuilder()
+                .setTerm(term)
+                .setLeaderId(leaderId)
+                .setSnapshot(snapshot))
+            .build();
+    }
+
+    public static RaftProtocol.RaftMessage installSnapshotResponse(long term, boolean success, long matchIndex) {
+        return RaftProtocol.RaftMessage.newBuilder()
+            .setInstallSnapshotResponse(RaftProtocol.InstallSnapshotResponse.newBuilder()
+                .setTerm(term)
+                .setSuccess(success)
+                .setMatchIndex(matchIndex))
+            .build();
+    }
+
+    public static RaftProtocol.Snapshot snapshot(long lastIncludedIndex, long lastIncludedTerm, byte[] data) {
+        return RaftProtocol.Snapshot.newBuilder()
+            .setLastIncludedIndex(lastIncludedIndex)
+            .setLastIncludedTerm(lastIncludedTerm)
+            .setData(ByteString.copyFrom(data))
+            .build();
+    }
+
     public static RaftProtocol.LogEntry entry(long index, long term, byte[] command) {
         return RaftProtocol.LogEntry.newBuilder()
             .setIndex(index)

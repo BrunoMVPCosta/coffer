@@ -21,6 +21,15 @@ message Delete {
 message Info {
 }
 
+message KvEntry {
+  string key = 1;
+  bytes value = 2;
+}
+
+message KvSnapshot {
+  repeated KvEntry entries = 1;
+}
+
 message KvCommand {
   oneof command {
     Put put = 1;
