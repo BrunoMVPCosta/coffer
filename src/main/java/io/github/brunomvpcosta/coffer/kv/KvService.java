@@ -7,6 +7,7 @@ import com.google.protobuf.ByteString;
 import com.google.protobuf.InvalidProtocolBufferException;
 import io.github.brunomvpcosta.coffer.net.Address;
 import io.github.brunomvpcosta.coffer.protocol.KvProtocol;
+import io.github.brunomvpcosta.coffer.raft.RaftNotLeaderException;
 import io.github.brunomvpcosta.coffer.raft.RaftService;
 import io.github.brunomvpcosta.coffer.transport.MessageKind;
 import io.github.brunomvpcosta.coffer.transport.Transport;
@@ -22,6 +23,7 @@ import io.github.brunomvpcosta.coffer.transport.Transport;
 public class KvService implements KvMessageHandler {
 
     private static final long WRITE_TIMEOUT_SECONDS = 5;
+    private static final long READ_TIMEOUT_SECONDS = 3;
 
     private final RaftService raft;
     private final Transport transport;
@@ -38,7 +40,7 @@ public class KvService implements KvMessageHandler {
     @Override
     public CompletableFuture<KvProtocol.KvResponse> handle(KvProtocol.KvCommand command) {
         return switch (command.getCommandCase()) {
-            case GET -> CompletableFuture.completedFuture(read(command.getGet()));
+            case GET -> read(command.getGet());
             case INFO -> CompletableFuture.completedFuture(info());
             case PUT, DELETE -> write(command);
             default -> CompletableFuture.completedFuture(error("empty command"));
@@ -55,11 +57,23 @@ public class KvService implements KvMessageHandler {
             .build();
     }
 
-    private KvProtocol.KvResponse read(KvProtocol.Get get) {
+    private CompletableFuture<KvProtocol.KvResponse> read(KvProtocol.Get get) {
         if (get.getKey().isBlank()) {
-            return error("key cannot be empty");
+            return CompletableFuture.completedFuture(error("key cannot be empty"));
         }
 
+        if (!raft.isLeader()) {
+            return forward(KvProtocol.KvCommand.newBuilder().setGet(get).build());
+        }
+
+        return raft.readIndex()
+            .thenCompose(index -> raft.awaitApplied(index))
+            .thenApply(ignored -> readLocal(get))
+            .orTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .exceptionally(this::readFailure);
+    }
+
+    private KvProtocol.KvResponse readLocal(KvProtocol.Get get) {
         var value = state.get(get.getKey());
 
         if (value.isEmpty()) {
@@ -73,6 +87,16 @@ public class KvService implements KvMessageHandler {
             .setValue(ByteString.copyFrom(value.get()))
             .setHasValue(true)
             .build();
+    }
+
+    private KvProtocol.KvResponse readFailure(Throwable cause) {
+        var root = cause.getCause() == null ? cause : cause.getCause();
+
+        if (root instanceof RaftNotLeaderException notLeader) {
+            return notLeader(notLeader.leaderId());
+        }
+
+        return error(root.getMessage() == null ? root.toString() : root.getMessage());
     }
 
     private CompletableFuture<KvProtocol.KvResponse> write(KvProtocol.KvCommand command) {

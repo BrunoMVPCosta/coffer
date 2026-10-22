@@ -76,8 +76,10 @@ Stop it with `docker compose down`.
   and snapshots are the only durability path.
 - The leader appends a no-op entry when elected; state machines must ignore
   empty commands.
-- KV writes are leader-only and followers forward them. Reads are served from
-  the local replica and may be stale; do not describe them as linearizable.
+- KV writes are leader-only and followers forward them. Reads are forwarded to
+  the leader and confirmed with a quorum heartbeat (`ReadIndex`) before the
+  leader serves them, so `get` is linearizable. `keys` and `info` are local and
+  may be stale.
 - `RaftService` state is guarded by `synchronized`; network callbacks may run on
   Netty threads. Keep state mutations inside the lock.
 - Prefer Java 21 features already in use (`record`, `var`, switch expressions)

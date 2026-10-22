@@ -51,6 +51,7 @@ public class RaftService implements RaftMessageHandler {
     private static final long DEFAULT_SNAPSHOT_THRESHOLD = 1024;
     private static final long DISCOVERY_GRACE_MS = 3000;
     private static final long TICK_MS = 50;
+    private static final long READ_TIMEOUT_SECONDS = 2;
 
     private final Node self;
     private final Transport transport;
@@ -75,6 +76,8 @@ public class RaftService implements RaftMessageHandler {
     private final Map<String, Long> nextIndex = new HashMap<>();
     private final Map<String, Long> matchIndex = new HashMap<>();
     private final Map<Long, CompletableFuture<Long>> applyWaiters = new HashMap<>();
+    private final Map<Long, List<CompletableFuture<Void>>> appliedWaiters = new HashMap<>();
+    private final List<ReadRequest> readRequests = new ArrayList<>();
     private final Set<String> votesGranted = new HashSet<>();
     private final RaftStorage storage;
 
@@ -480,6 +483,7 @@ public class RaftService implements RaftMessageHandler {
         storage.saveSnapshot(incoming);
         stateMachine.restore(incoming.getData().toByteArray());
         persist();
+        completeAppliedWaiters();
 
         log("installed snapshot at index " + logBaseIndex);
 
@@ -499,6 +503,7 @@ public class RaftService implements RaftMessageHandler {
         if (response.getSuccess()) {
             matchIndex.merge(peer.id(), response.getMatchIndex(), Math::max);
             nextIndex.put(peer.id(), matchIndex.getOrDefault(peer.id(), 0L) + 1);
+            acknowledgeReads(peer.id());
             advanceCommitIndex();
             return;
         }
@@ -547,6 +552,12 @@ public class RaftService implements RaftMessageHandler {
         leaderId = null;
         votesGranted.clear();
         resetElectionTimeout();
+
+        for (var request : readRequests) {
+            request.future.completeExceptionally(new RaftNotLeaderException(leaderId));
+        }
+
+        readRequests.clear();
 
         if (wasLeader) {
             log("stepped down in term " + currentTerm);
@@ -694,6 +705,8 @@ public class RaftService implements RaftMessageHandler {
                 maybeSnapshot();
             }
         }
+
+        completeAppliedWaiters();
     }
 
     private void maybeSnapshot() {
@@ -853,6 +866,85 @@ public class RaftService implements RaftMessageHandler {
 
     private void log(String message) {
         System.out.println("[RAFT] - " + selfId() + " " + message);
+    }
+
+    /**
+     * Confirms leadership with a heartbeat round and returns the commit index
+     * that must be applied before serving a linearizable read.
+     */
+    public synchronized CompletableFuture<Long> readIndex() {
+        if (role != Role.LEADER) {
+            return CompletableFuture.failedFuture(new RaftNotLeaderException(leaderId));
+        }
+
+        var request = new ReadRequest(commitIndex, selfId());
+
+        if (request.acknowledged.size() >= quorum()) {
+            return CompletableFuture.completedFuture(request.index);
+        }
+
+        readRequests.add(request);
+        sendHeartbeats();
+
+        return request.future
+            .orTimeout(READ_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+            .whenComplete((index, cause) -> {
+                synchronized (RaftService.this) {
+                    readRequests.remove(request);
+                }
+            });
+    }
+
+    /**
+     * Completes once the local state machine has applied {@code index}.
+     */
+    public synchronized CompletableFuture<Void> awaitApplied(long index) {
+        if (lastApplied >= index) {
+            return CompletableFuture.completedFuture(null);
+        }
+
+        var future = new CompletableFuture<Void>();
+        appliedWaiters.computeIfAbsent(index, key -> new ArrayList<>()).add(future);
+        return future;
+    }
+
+    private void acknowledgeReads(String peerId) {
+        var iterator = readRequests.iterator();
+
+        while (iterator.hasNext()) {
+            var request = iterator.next();
+            request.acknowledged.add(peerId);
+
+            if (request.acknowledged.size() >= quorum()) {
+                request.future.complete(request.index);
+                iterator.remove();
+            }
+        }
+    }
+
+    private void completeAppliedWaiters() {
+        var iterator = appliedWaiters.entrySet().iterator();
+
+        while (iterator.hasNext()) {
+            var entry = iterator.next();
+
+            if (entry.getKey() <= lastApplied) {
+                entry.getValue().forEach(future -> future.complete(null));
+                iterator.remove();
+            }
+        }
+    }
+
+    private static final class ReadRequest {
+
+        private final long index;
+        private final Set<String> acknowledged = new HashSet<>();
+        private final CompletableFuture<Long> future = new CompletableFuture<>();
+
+        private ReadRequest(long index, String selfId) {
+            this.index = index;
+            this.acknowledged.add(selfId);
+        }
     }
 
     public synchronized Role role() {

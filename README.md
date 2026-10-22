@@ -111,7 +111,10 @@ replaying the persisted log after a restart.
 
 - writes must reach the leader; a follower forwards the command and returns the
   leader's response
-- reads are served by the contacted node, so a follower read can be stale
+- reads are linearizable: a follower forwards them to the leader, which
+  confirms leadership with a quorum heartbeat (ReadIndex) and waits until the
+  commit index it captured has been applied before answering
+- `keys` and `info` are answered by the contacted node and can lag behind
 - a write is acknowledged only after the leader applies the committed entry
 
 The CLI works in two modes. With only an address it opens a shell and keeps one
@@ -167,8 +170,9 @@ Locally, with the cluster running from Maven:
 mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvpcosta.coffer.KvClient -Dexec.args="127.0.0.1:8080"
 ```
 
-Write to the leader, then read from each node to see replication. Read from a
-follower only after it has caught up if you need read-after-write consistency.
+Write to the leader, then read from each node to see replication. Reads are
+linearizable and can be served by any node; `keys` and `info` are local and may
+lag behind the leader.
 
 ## How to run with Docker
 
@@ -201,7 +205,6 @@ NODE_HOST=127.0.0.1 mvn -q compile exec:java -Dexec.mainClass=io.github.brunomvp
 ## Future work
 
 - Add integration tests to the transport layer
-- Add linearizable reads (ReadIndex or leader lease)
 - Implement Raft configuration changes instead of a static roster
 
 ## License

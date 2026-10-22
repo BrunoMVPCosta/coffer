@@ -87,6 +87,29 @@ class KvServiceTest {
     }
 
     @Test
+    void readOnFollowerIsForwardedToKnownLeader() throws Exception {
+        createRaft(PEER2);
+        raft.handle(RaftMessages.appendEntries(1, PEER2.id(), 0, 0, List.of(), 0));
+
+        var result = kv.handle(get("a"));
+        var forwarded = transport.last(MessageKind.KV);
+
+        assertEquals(new Address(PEER2.host(), PEER2.port()), forwarded.address());
+
+        forwarded.response().complete(KvProtocol.KvResponse.newBuilder()
+            .setStatus(KvProtocol.KvResponse.Status.STATUS_OK)
+            .setValue(ByteString.copyFromUtf8("1"))
+            .setHasValue(true)
+            .build()
+            .toByteArray());
+
+        var response = result.get(1, TimeUnit.SECONDS);
+
+        assertEquals(KvProtocol.KvResponse.Status.STATUS_OK, response.getStatus());
+        assertEquals("1", response.getValue().toStringUtf8());
+    }
+
+    @Test
     void infoReportsRoleTermLeaderAndKeys() throws Exception {
         startSingleNodeLeader();
         call(put("b", "2"));
@@ -135,6 +158,10 @@ class KvServiceTest {
         raft = new RaftService(LOCAL, List.of(), transport, storage, 2,
             50, 100, 200, clock::get, new Random(7));
         kv = new KvService(raft, transport, new KvStateMachine());
+
+        clock.set(20_000);
+        raft.tick();
+        assertTrue(raft.isLeader());
 
         var read = call(get("a"));
 

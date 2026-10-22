@@ -237,6 +237,43 @@ class RaftServiceTest {
     }
 
     @Test
+    void readIndexRequiresAQuorumHeartbeat() throws Exception {
+        raft = newRaft(PEER2, PEER3);
+        afterDiscovery();
+        raft.tick();
+        transport.completeVote(PEER2, 1, true);
+        assertTrue(raft.isLeader());
+
+        var future = raft.readIndex();
+        var index = raft.commitIndex();
+
+        assertFalse(future.isDone());
+
+        transport.completeAppend(PEER2, 1, true, raft.lastIndex());
+
+        assertEquals(index, future.get(1, TimeUnit.SECONDS));
+    }
+
+    @Test
+    void readIndexCompletesImmediatelyOnSingleNode() throws Exception {
+        afterDiscovery();
+        raft.tick();
+
+        var future = raft.readIndex();
+
+        assertTrue(future.isDone());
+        assertEquals(raft.commitIndex(), future.get());
+    }
+
+    @Test
+    void readIndexFailsWhenNotLeader() {
+        var future = raft.readIndex();
+        var cause = future.handle((value, error) -> error).join();
+
+        assertTrue(cause instanceof RaftNotLeaderException);
+    }
+
+    @Test
     void installSnapshotReplacesLogAndContinues() {
         var machine = new RecordingStateMachine();
         raft.setStateMachine(machine);
